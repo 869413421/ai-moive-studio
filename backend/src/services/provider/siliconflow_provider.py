@@ -26,6 +26,8 @@ class SiliconFlowProvider(BaseLLMProvider):
         # 规范化 base_url: 确保以斜杠结尾
         if not base_url.endswith('/'):
             base_url = base_url + '/'
+
+        self.base_url = base_url
         
         self.client = AsyncOpenAI(
             api_key=api_key,
