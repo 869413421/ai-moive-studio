@@ -35,9 +35,12 @@ class MinIOStorage:
             region=settings.MINIO_REGION,
         )
         self.bucket_name = settings.MINIO_BUCKET_NAME
+        self._bucket_ready = False
 
     async def ensure_bucket_exists(self) -> None:
         """确保存储桶存在"""
+        if self._bucket_ready:
+            return
         try:
             if not self.client.bucket_exists(self.bucket_name):
                 self.client.make_bucket(self.bucket_name, location="us-east-1")
@@ -56,6 +59,7 @@ class MinIOStorage:
                     ]
                 }
                 # 注意：实际环境中可能需要更严格的权限控制
+            self._bucket_ready = True
         except S3Error as e:
             logger.error(f"创建MinIO存储桶失败: {e}")
             raise StorageError(f"无法创建存储桶: {str(e)}")

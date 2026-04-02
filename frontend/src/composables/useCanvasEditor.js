@@ -14,6 +14,25 @@ const DEFAULT_SIZE = {
 }
 
 const PERSIST_DEBOUNCE_MS = 300
+const MEDIA_URL_TO_OBJECT_KEY_FIELDS = {
+  result_image_url: 'result_image_object_key',
+  reference_image_url: 'reference_image_object_key',
+  result_video_url: 'result_video_object_key'
+}
+
+const stripTransientMediaUrls = (payload = {}) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload
+  }
+
+  const sanitized = { ...payload }
+  Object.entries(MEDIA_URL_TO_OBJECT_KEY_FIELDS).forEach(([urlField, objectKeyField]) => {
+    if (sanitized[objectKeyField]) {
+      delete sanitized[urlField]
+    }
+  })
+  return sanitized
+}
 
 export function useCanvasEditor() {
   const loading = ref(false)
@@ -100,11 +119,11 @@ export function useCanvasEditor() {
       width: item.width,
       height: item.height,
       z_index: item.z_index,
-      content: item.content,
+      content: stripTransientMediaUrls(item.content),
       generation_config: item.generation_config,
       last_run_status: item.last_run_status,
       last_run_error: item.last_run_error,
-      last_output: item.last_output
+      last_output: stripTransientMediaUrls(item.last_output)
     })
   }
 

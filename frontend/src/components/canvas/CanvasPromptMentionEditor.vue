@@ -625,9 +625,6 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (editableRef.value && !isSyncingEditor.value) {
-    flushTokens()
-  }
   cancelMentionQueryFrame()
   if (typeof window !== 'undefined') {
     window.removeEventListener('resize', updateReferencePickerLayout)

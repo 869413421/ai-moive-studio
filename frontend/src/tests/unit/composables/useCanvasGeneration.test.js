@@ -147,7 +147,7 @@ describe('useCanvasGeneration SSE handling', () => {
     app.unmount()
   })
 
-  it('strips transient media urls before persisting completed image results', async () => {
+  it('keeps transient media urls in local completed image results for immediate preview', async () => {
     const updateItem = vi.fn()
     const { app, composable } = mountComposable(updateItem)
 
@@ -195,10 +195,12 @@ describe('useCanvasGeneration SSE handling', () => {
       'item-image-1',
       expect.objectContaining({
         content: {
-          result_image_object_key: 'uploads/generated.png'
+          result_image_object_key: 'uploads/generated.png',
+          result_image_url: 'https://cdn.example.com/uploads/generated.png'
         },
         last_output: {
-          result_image_object_key: 'uploads/generated.png'
+          result_image_object_key: 'uploads/generated.png',
+          result_image_url: 'https://cdn.example.com/uploads/generated.png'
         },
         last_run_status: 'completed'
       })

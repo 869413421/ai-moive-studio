@@ -228,6 +228,13 @@ const handleEditorBlur = (event) => {
   emit('update:text', event.target.innerHTML)
 }
 
+const flushDraft = () => {
+  promptEditorRef.value?.flushTokens?.()
+  if (editableRef.value) {
+    emit('update:text', editableRef.value.innerHTML)
+  }
+}
+
 watch(
   () => props.draft.text,
   (value) => {
@@ -242,6 +249,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearPendingEditorCardDrag()
+})
+
+defineExpose({
+  flushDraft
 })
 </script>
 

@@ -45,6 +45,7 @@
 
       <CanvasTextStudio
         v-if="selectedItem?.item_type === 'text'"
+        ref="textStudioRef"
         :item="selectedItem"
         :style="selectedItemStyle"
         :draft="textStudioDraft"
@@ -54,7 +55,7 @@
         :api-key-options="apiKeyOptions"
         :model-options="textModelOptions"
         :model-options-loading="catalogLoading"
-        @focus-item="setSelection"
+        @focus-item="handleFocusItem"
         @drag-node="startStudioNodeDrag"
         @handle-drag="handleStudioHandleDrag"
         @update:title="patchSelected({ title: $event })"
@@ -68,6 +69,7 @@
 
       <CanvasImageStudio
         v-if="selectedItem?.item_type === 'image'"
+        ref="imageStudioRef"
         :style="selectedItemStyle"
         :draft="imageStudioDraft"
         :available-reference-items="availableReferenceItems"
@@ -77,7 +79,7 @@
         :api-key-options="apiKeyOptions"
         :model-options="imageModelOptions"
         :model-options-loading="catalogLoading"
-        @focus-item="setSelection"
+        @focus-item="handleFocusItem"
         @drag-node="startStudioNodeDrag"
         @handle-drag="handleStudioHandleDrag"
         @update:title="patchSelected({ title: $event })"
@@ -94,6 +96,7 @@
 
       <CanvasVideoStudio
         v-if="selectedItem?.item_type === 'video'"
+        ref="videoStudioRef"
         :style="selectedItemStyle"
         :draft="videoStudioDraft"
         :status-meta="selectedVideoStatusMeta"
@@ -105,7 +108,7 @@
         :api-key-options="apiKeyOptions"
         :model-options="videoModelOptions"
         :model-options-loading="catalogLoading"
-        @focus-item="setSelection"
+        @focus-item="handleFocusItem"
         @drag-node="startStudioNodeDrag"
         @handle-drag="handleStudioHandleDrag"
         @update:title="patchSelected({ title: $event })"
@@ -144,6 +147,9 @@ import { buildPromptDerivatives } from '@/utils/promptMentionTokens'
 const route = useRoute()
 const router = useRouter()
 const stageShellRef = ref(null)
+const textStudioRef = ref(null)
+const imageStudioRef = ref(null)
+const videoStudioRef = ref(null)
 const uploading = ref(false)
 const catalogLoading = ref(false)
 const styleReferencePreviewMap = ref({})
@@ -649,7 +655,7 @@ const handleGlobalPointerUp = async () => {
         const targetHandle = linkDrag.value.currentCanvasX < targetItem.position_x + targetItem.width / 2 ? 'left' : 'right'
         startConnection(sourceItemId, sourceHandle)
         await completeConnection(targetItem.id, targetHandle)
-        setSelection(targetItem.id)
+        await setSelectionWithDraftSync(targetItem.id)
       } else {
         linkMenu.visible = true
         linkMenu.screenX = linkDrag.value.currentScreenX
@@ -705,10 +711,11 @@ const updatePromptTokens = (tokens) => {
 
 const createNode = async (type) => {
   try {
+    syncSelectedStudioDraft()
     const item = await createItem(type)
     closeLinkMenu()
     if (item?.id) {
-      setSelection(item.id)
+      await setSelectionWithDraftSync(item.id)
     }
   } catch (error) {
     ElMessage.error(error?.response?.data?.detail || error?.message || '创建节点失败')
@@ -717,6 +724,7 @@ const createNode = async (type) => {
 
 const handleCreateLinkedNode = async (type) => {
   try {
+    syncSelectedStudioDraft()
     const item = await createItem(type, {
       position_x: Math.max(40, linkMenu.canvasX),
       position_y: Math.max(40, linkMenu.canvasY)
@@ -726,7 +734,7 @@ const handleCreateLinkedNode = async (type) => {
     }
     startConnection(linkMenu.sourceItemId, linkMenu.sourceHandle)
     await completeConnection(item.id, 'left')
-    setSelection(item.id)
+    await setSelectionWithDraftSync(item.id)
     closeLinkMenu()
   } catch (error) {
     ElMessage.error(error?.response?.data?.detail || error?.message || '创建下游节点失败')
@@ -734,6 +742,7 @@ const handleCreateLinkedNode = async (type) => {
 }
 
 const handleSave = async () => {
+  syncSelectedStudioDraft()
   await save()
   ElMessage.success('画布已保存')
 }
@@ -748,19 +757,20 @@ const handleRemoveSelectedConnection = async () => {
   }
 }
 
-const handleStageClick = () => {
-  clearSelection()
+const handleStageClick = async () => {
+  await clearSelectionWithDraftSync()
   selectedConnectionId.value = null
   closeLinkMenu()
 }
 
-const handleItemClick = (item) => {
-  setSelection(item.id)
+const handleItemClick = async (item) => {
+  await setSelectionWithDraftSync(item.id)
   selectedConnectionId.value = null
   closeLinkMenu()
 }
 
-const handleConnectionClick = (connection) => {
+const handleConnectionClick = async (connection) => {
+  syncSelectedStudioDraft()
   selectedConnectionId.value = connection.id
   clearSelection()
   closeLinkMenu()
@@ -789,6 +799,47 @@ const handleViewportChange = ({ x, y, scale, width, height }) => {
 
 const handleStageHandlePointerDown = ({ item, handle, event }) => {
   startLinkDrag(item, handle, event.evt)
+}
+
+const syncSelectedStudioDraft = () => {
+  if (!selectedItem.value) {
+    return
+  }
+
+  if (selectedItem.value.item_type === 'text') {
+    textStudioRef.value?.flushDraft?.()
+    return
+  }
+
+  if (selectedItem.value.item_type === 'image') {
+    imageStudioRef.value?.flushDraft?.()
+    return
+  }
+
+  if (selectedItem.value.item_type === 'video') {
+    videoStudioRef.value?.flushDraft?.()
+  }
+}
+
+const setSelectionWithDraftSync = async (itemId) => {
+  if (itemId === selectedItem.value?.id) {
+    setSelection(itemId)
+    return
+  }
+
+  syncSelectedStudioDraft()
+  await Promise.resolve()
+  setSelection(itemId)
+}
+
+const clearSelectionWithDraftSync = async () => {
+  syncSelectedStudioDraft()
+  await Promise.resolve()
+  clearSelection()
+}
+
+const handleFocusItem = async (itemId) => {
+  await setSelectionWithDraftSync(itemId)
 }
 
 const handleStudioHandleDrag = (event, handle) => {
@@ -820,10 +871,10 @@ const handleSelectionBoxEnd = ({ bounds, appendToSelection }) => {
     item.position_y + item.height > bounds.top
   )
   if (hitItem) {
-    setSelection(hitItem.id)
+    void setSelectionWithDraftSync(hitItem.id)
     selectedConnectionId.value = null
   } else if (!appendToSelection) {
-    clearSelection()
+    void clearSelectionWithDraftSync()
   }
 }
 
@@ -874,6 +925,7 @@ const buildGenerationPayload = (item) => {
 const handleGenerate = async () => {
   if (!selectedItem.value) return
   try {
+    syncSelectedStudioDraft()
     if (dirty.value) {
       await save()
     }
@@ -982,6 +1034,7 @@ const refreshHistory = async () => {
 const removeSelectedItem = async () => {
   if (!selectedItem.value) return
   try {
+    syncSelectedStudioDraft()
     const nextPreviewMap = { ...styleReferencePreviewMap.value }
     delete nextPreviewMap[selectedItem.value.id]
     styleReferencePreviewMap.value = nextPreviewMap
@@ -1017,6 +1070,7 @@ watch(
   () => route.params.canvasId,
   async (canvasId) => {
     if (canvasId) {
+      syncSelectedStudioDraft()
       styleReferencePreviewMap.value = {}
       imageUploadPreviewMap.value = {}
       await loadDocument(canvasId)
@@ -1031,6 +1085,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  syncSelectedStudioDraft()
   window.removeEventListener('beforeunload', handleBeforeUnload)
   window.removeEventListener('mousemove', handleGlobalPointerMove)
   window.removeEventListener('mouseup', handleGlobalPointerUp)

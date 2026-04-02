@@ -1,7 +1,7 @@
 import inspect
 from typing import Union
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Query, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -262,7 +262,7 @@ async def get_canvas_item(
     return await build_item_payload(item)
 
 
-@router.patch("/canvas-documents/{document_id}/items/{item_id}", response_model=CanvasItemPayload)
+@router.patch("/canvas-documents/{document_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def update_canvas_item(
     document_id: str,
     item_id: str,
@@ -271,9 +271,9 @@ async def update_canvas_item(
     db: AsyncSession = Depends(get_db),
 ):
     service = CanvasService(db)
-    item = await service.update_item(document_id, item_id, str(current_user.id), payload.model_dump(exclude_none=True))
+    await service.update_item(document_id, item_id, str(current_user.id), payload.model_dump(exclude_none=True))
     await db.commit()
-    return await build_item_payload(item)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.delete("/canvas-documents/{document_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)

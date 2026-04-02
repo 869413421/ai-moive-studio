@@ -265,6 +265,12 @@ const handlePreviewPointerDown = (event) => {
 onBeforeUnmount(() => {
   clearPendingPreviewDrag()
 })
+
+defineExpose({
+  flushDraft: () => {
+    promptEditorRef.value?.flushTokens?.()
+  }
+})
 </script>
 
 <style scoped>

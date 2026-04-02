@@ -1027,8 +1027,14 @@ class TestCanvasDocumentApi:
                 "content": {"text": "Updated opening text"},
             },
         )
-        assert patch_response.status_code == 200
-        patched = patch_response.json()
+        assert patch_response.status_code == 204
+
+        patched_detail_response = await client.get(
+            f"/api/v1/canvas-documents/{canvas_id}/items/{item_id}",
+            headers=auth_headers,
+        )
+        assert patched_detail_response.status_code == 200
+        patched = patched_detail_response.json()
         assert patched["title"] == "Opening Beat v2"
         assert patched["content"]["text"] == "Updated opening text"
 
