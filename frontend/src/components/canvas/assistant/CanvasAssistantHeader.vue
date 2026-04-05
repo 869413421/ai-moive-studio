@@ -17,14 +17,8 @@
       </button>
     </div>
 
-    <div v-if="selectedItemIds.length || sessionId" class="assistant-header__chips">
+    <div v-if="sessionId" class="assistant-header__chips">
       <span v-if="sessionId" class="assistant-chip">Session {{ sessionId }}</span>
-      <span v-for="itemId in previewSelectedItemIds" :key="itemId" class="assistant-chip">
-        {{ itemId }}
-      </span>
-      <span v-if="selectedItemIds.length > previewSelectedItemIds.length" class="assistant-chip">
-        +{{ selectedItemIds.length - previewSelectedItemIds.length }}
-      </span>
     </div>
   </header>
 </template>
@@ -39,8 +33,6 @@
     status: { type: String, default: 'idle' },
     // sessionId: 当前会话 id，便于调试和学习确认恢复链路。
     sessionId: { type: String, default: '' },
-    // selectedItemIds: 当前选中节点列表，用于提示上下文范围。
-    selectedItemIds: { type: Array, default: () => [] },
     // canReset: 是否展示“重置会话”按钮。
     canReset: { type: Boolean, default: false },
     // streaming: 当前是否正在流式处理。
@@ -52,13 +44,13 @@
   const statusLabels = {
     idle: '待命',
     streaming: '处理中',
-    awaiting_confirmation: '等待确认',
+    awaiting_interrupt: '等待确认',
     error: '发生错误'
   }
 
   const statusTone = computed(() => {
     if (props.status === 'streaming') return 'busy'
-    if (props.status === 'awaiting_confirmation') return 'warning'
+    if (props.status === 'awaiting_interrupt') return 'warning'
     if (props.status === 'error') return 'error'
     return 'idle'
   })
@@ -71,18 +63,12 @@
       return '正在通过 SSE 流式处理请求。'
     }
 
-    if (props.status === 'awaiting_confirmation') {
+    if (props.status === 'awaiting_interrupt') {
       return '助手已经给出确认卡，先选模型再继续。'
     }
 
-    if (props.selectedItemIds.length) {
-      return `当前选中 ${props.selectedItemIds.length} 个节点，描述可以引用这些节点。`
-    }
-
-    return '直接描述你想要的改动，或让助手检查画布。'
+    return '直接描述你想要的改动，Agent 会自行观察并定位画布目标。'
   })
-
-  const previewSelectedItemIds = computed(() => props.selectedItemIds.slice(0, 3))
 </script>
 
 <style scoped>

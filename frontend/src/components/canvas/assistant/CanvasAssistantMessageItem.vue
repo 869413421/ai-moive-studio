@@ -91,6 +91,8 @@
     line-height: 1.65;
     font-size: 14px;
     color: inherit;
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .assistant-message__cursor {

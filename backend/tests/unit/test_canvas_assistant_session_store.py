@@ -31,23 +31,26 @@ class FakeRedis:
 
 
 @pytest.mark.asyncio
-async def test_redis_session_store_persists_pending_interrupt_and_checkpoint() -> None:
+async def test_redis_session_store_persists_pending_interrupt_and_graph_state() -> None:
     store = RedisCanvasAssistantSessionStore(FakeRedis(), ttl_seconds=600)
     session = CanvasAgentSession(
         session_id="session-1",
         user_id="user-1",
         document_id="doc-1",
         conversation=[{"role": "user", "content": "hello"}],
+        user_goal="删除开场节点",
         pending_interrupt=AgentInterrupt(
             interrupt_id="interrupt-1",
-            kind="confirm_execute",
-            title="确认执行画布操作",
+            kind="confirm_delete",
+            title="确认删除节点",
             message="准备执行",
             actions=["approve", "reject"],
-            scope_item_ids=["item-1"],
+            tool_name="canvas.delete_items",
+            args={"item_ids": ["item-1"]},
         ),
-        checkpoint_id="checkpoint-1",
-        checkpoint_state={"operations": [{"tool_name": "canvas.update_items"}]},
+        graph_state={"route": "request_interrupt", "resolved_targets": [{"item_id": "item-1"}]},
+        tool_history=[{"tool_name": "canvas.find_items", "result": {"items": [{"id": "item-1"}]}}],
+        status="interrupted",
     )
 
     await store.save(session)
@@ -55,7 +58,8 @@ async def test_redis_session_store_persists_pending_interrupt_and_checkpoint() -
 
     assert restored.pending_interrupt is not None
     assert restored.pending_interrupt.interrupt_id == "interrupt-1"
-    assert restored.checkpoint_state == {"operations": [{"tool_name": "canvas.update_items"}]}
+    assert restored.graph_state == {"route": "request_interrupt", "resolved_targets": [{"item_id": "item-1"}]}
+    assert restored.tool_history[0]["tool_name"] == "canvas.find_items"
 
 
 @pytest.mark.asyncio
@@ -68,8 +72,8 @@ async def test_redis_session_store_rejects_duplicate_resume_lock() -> None:
         document_id="doc-1",
         pending_interrupt=AgentInterrupt(
             interrupt_id="interrupt-1",
-            kind="confirm_execute",
-            title="确认执行画布操作",
+            kind="confirm_delete",
+            title="确认删除节点",
             message="准备执行",
             actions=["approve", "reject"],
         ),
@@ -87,7 +91,7 @@ async def test_redis_session_store_rejects_duplicate_resume_lock() -> None:
 
 
 @pytest.mark.asyncio
-async def test_redis_session_store_serializes_canvas_models_in_tool_trace() -> None:
+async def test_redis_session_store_serializes_canvas_models_in_tool_history() -> None:
     store = RedisCanvasAssistantSessionStore(FakeRedis(), ttl_seconds=600)
     item = CanvasItem(
         id=uuid.uuid4(),
@@ -102,11 +106,11 @@ async def test_redis_session_store_serializes_canvas_models_in_tool_trace() -> N
         session_id="session-serialize",
         user_id="user-1",
         document_id="doc-1",
-        tool_trace=[{"tool_name": "canvas.update_items", "result": [item]}],
+        tool_history=[{"tool_name": "canvas.update_item", "result": {"item": item}}],
     )
 
     await store.save(session)
     restored = await store.require("session-serialize", "user-1", "doc-1")
 
-    serialized_item = restored.tool_trace[0]["result"][0]
+    serialized_item = restored.tool_history[0]["result"]["item"]
     assert serialized_item["title"] == "新标题"

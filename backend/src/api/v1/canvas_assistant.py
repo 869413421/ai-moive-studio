@@ -11,13 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.api.dependencies import get_current_user_required
 from src.api.schemas.canvas_assistant import CanvasAssistantChatRequest, CanvasAssistantResumeRequest
 from src.api.v1.canvas import dispatch_canvas_image_generation, dispatch_canvas_text_generation, dispatch_canvas_video_generation
-from src.assistant.llm_planner import CanvasAssistantLLMPlanner
-from src.assistant.planner import CanvasAgentPlanner
+from src.assistant.agent_factory import CanvasAssistantAgentFactory
 from src.assistant.service import CanvasAssistantService
 from src.assistant.session_store import InMemoryCanvasAssistantSessionStore, RedisCanvasAssistantSessionStore
 from src.assistant.sse import encode_sse_event
-from src.assistant.tools.canvas_tools import CanvasAssistantCanvasReadTools, CanvasAssistantCanvasWriteTools
-from src.assistant.tools.generation_tools import CanvasAssistantGenerationTools, CanvasAssistantObservationTools
+from src.assistant.tools.canvas_tools import CanvasAssistantCanvasExecutionTools, CanvasAssistantCanvasInspectionTools
+from src.assistant.tools.generation_tools import CanvasAssistantGenerationTools
 from src.core.config import settings
 from src.core.database import get_db
 from src.models.user import User
@@ -41,20 +40,26 @@ def _get_redis_client():
 
 def get_canvas_assistant_service(db: AsyncSession = Depends(get_db)) -> CanvasAssistantService:
     canvas_service = CanvasService(db)
-    read_tools = CanvasAssistantCanvasReadTools(canvas_service)
+    inspection_tools = CanvasAssistantCanvasInspectionTools(canvas_service)
     redis_client = _get_redis_client()
+    generation_tools = CanvasAssistantGenerationTools(
+        generation_service=CanvasGenerationService(db),
+        dispatch_text=dispatch_canvas_text_generation,
+        dispatch_image=dispatch_canvas_image_generation,
+        dispatch_video=dispatch_canvas_video_generation,
+    )
+    agent_factory = CanvasAssistantAgentFactory(
+        db_session=db,
+        inspection_tools=inspection_tools,
+        canvas_execution_tools=CanvasAssistantCanvasExecutionTools(canvas_service),
+        generation_tools=generation_tools,
+    )
     return CanvasAssistantService(
         session_store=RedisCanvasAssistantSessionStore(redis_client) if redis_client is not None else InMemoryCanvasAssistantSessionStore(),
-        planner=CanvasAgentPlanner(llm_planner=CanvasAssistantLLMPlanner(db)),
-        canvas_read_tools=read_tools,
-        canvas_write_tools=CanvasAssistantCanvasWriteTools(canvas_service),
-        generation_tools=CanvasAssistantGenerationTools(
-            generation_service=CanvasGenerationService(db),
-            dispatch_text=dispatch_canvas_text_generation,
-            dispatch_image=dispatch_canvas_image_generation,
-            dispatch_video=dispatch_canvas_video_generation,
-        ),
-        observation_tools=CanvasAssistantObservationTools(read_tools),
+        inspection_tools=inspection_tools,
+        canvas_execution_tools=CanvasAssistantCanvasExecutionTools(canvas_service),
+        generation_tools=generation_tools,
+        agent_factory=agent_factory,
     )
 
 

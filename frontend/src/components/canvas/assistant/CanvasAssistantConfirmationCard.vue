@@ -12,15 +12,6 @@
       {{ interrupt.message }}
     </p>
 
-    <div v-if="interrupt.scopeItemIds.length" class="assistant-confirmation__section">
-      <div class="assistant-confirmation__label">关联节点</div>
-      <div class="assistant-confirmation__chips">
-        <span v-for="itemId in interrupt.scopeItemIds" :key="itemId" class="assistant-confirmation__chip">
-          {{ itemId }}
-        </span>
-      </div>
-    </div>
-
     <div v-if="interrupt.modelOptions.length" class="assistant-confirmation__section">
       <label class="assistant-confirmation__label" for="assistant-model-select">执行模型</label>
       <select
@@ -68,7 +59,6 @@
         title: '',
         message: '',
         selectedModelId: '',
-        scopeItemIds: [],
         modelOptions: [],
         actions: []
       })
@@ -173,22 +163,6 @@
     font-size: 12px;
     font-weight: 600;
   }
-
-  .assistant-confirmation__chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  .assistant-confirmation__chip {
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(75, 120, 255, 0.08);
-    border: 1px solid rgba(75, 120, 255, 0.12);
-    color: #355ce0;
-    font-size: 12px;
-  }
-
   .assistant-confirmation__select {
     width: 100%;
     min-height: 40px;

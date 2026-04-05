@@ -1,10 +1,12 @@
 <template>
-  <aside class="canvas-assistant">
+  <aside
+    class="canvas-assistant"
+    style="user-select: text; -webkit-user-select: text"
+  >
     <CanvasAssistantHeader
       :title="title"
       :status="status"
       :session-id="sessionId"
-      :selected-item-ids="selectedItemIds"
       :can-reset="canReset"
       :streaming="isStreaming"
       @reset="handleReset"
@@ -48,8 +50,6 @@
   const props = defineProps({
     // documentId: 当前画布 id，用来绑定 assistant 会话和上下文。
     documentId: { type: String, default: '' },
-    // selectedItemIds: 当前选中节点快照，让 assistant 能理解“你说的这个节点”。
-    selectedItemIds: { type: Array, default: () => [] },
     refreshCanvas: { type: Function, default: null },
     // title: 右侧助手栏标题，默认保持通用文案。
     title: { type: String, default: 'AI 助手' }
@@ -58,15 +58,13 @@
   // assistant composable 负责真实状态机；组件本身只拼装头部、时间线和输入区。
   const assistant = useCanvasAssistant({
     documentId: computed(() => props.documentId),
-    selectedItemIds: computed(() => props.selectedItemIds),
     onMutationApplied: (...args) => props.refreshCanvas?.(...args)
   })
   const sessionId = assistant.sessionId
   const status = assistant.status
   const error = assistant.error
   const messages = assistant.messages
-  const stepEvents = assistant.stepEvents ?? computed(() => [])
-  const toolTrace = assistant.toolTrace ?? computed(() => [])
+  const eventLog = assistant.eventLog ?? computed(() => [])
   const pendingInterrupt = assistant.pendingInterrupt ?? computed(() => null)
   const apiKeyOptions = assistant.apiKeyOptions
   const chatModelOptions = assistant.chatModelOptions
@@ -85,27 +83,14 @@
 
   const { timelineItems } = useCanvasAssistantTimeline(assistant)
 
-  // 若当前正等待确认，优先展示确认卡片绑定的节点数量；
-  // 否则退回到编辑器当前选中数量。
-  const selectedCount = computed(
-    () =>
-      pendingInterrupt.value?.scopeItemIds?.length ||
-      props.selectedItemIds.length ||
-      0
-  )
   const canReset = computed(
     () =>
+      eventLog.value.length > 0 ||
       messages.value.length > 0 ||
-      stepEvents.value.length > 0 ||
-      toolTrace.value.length > 0 ||
       Boolean(pendingInterrupt.value) ||
       Boolean(error.value)
   )
-  const composerPlaceholder = computed(() =>
-    selectedCount.value > 0
-      ? `对已选 ${selectedCount.value} 个节点描述要做的事`
-      : '描述你想让画布帮你完成的事情'
-  )
+  const composerPlaceholder = computed(() => '描述你想让画布帮你完成的事情')
 
   const handleSend = (message) => sendMessage(message)
   const handleUpdateSelectedApiKeyId = (apiKeyId) => updateSelectedApiKeyId(apiKeyId)
@@ -135,6 +120,8 @@
       radial-gradient(circle at top, rgba(75, 120, 255, 0.08), transparent 34%);
     backdrop-filter: blur(18px);
     box-shadow: inset 1px 0 0 rgba(255, 255, 255, 0.6);
+    user-select: text;
+    -webkit-user-select: text;
   }
 
   .canvas-assistant__timeline {

@@ -11,9 +11,6 @@ const getAccessToken = () => {
   }
 }
 
-const normalizeSelectedItemIds = (value) =>
-  [...new Set((Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter(Boolean))]
-
 const stripUndefinedEntries = (value = {}) =>
   Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined))
 
@@ -25,19 +22,13 @@ const normalizeMessage = (data = {}) => ({
   order: Number.isFinite(Number(data.order)) ? Number(data.order) : undefined
 })
 
-const normalizeStep = (data = {}) => ({
-  id: String(data.id || '').trim(),
-  title: String(data.title || data.name || '').trim(),
-  status: String(data.status || 'running').trim() || 'running',
-  order: Number.isFinite(Number(data.order)) ? Number(data.order) : undefined
-})
-
 const normalizeToolCall = (data = {}) => ({
   id: String(data.id || data.tool_call_id || '').trim(),
   toolName: String(data.tool_name || data.toolName || '').trim(),
   status: String(data.status || 'completed').trim() || 'completed',
   args: data.args ?? data.arguments ?? null,
   result: data.result ?? null,
+  effect: data.effect ?? data.result?.effect ?? null,
   order: Number.isFinite(Number(data.order)) ? Number(data.order) : undefined
 })
 
@@ -49,8 +40,7 @@ const normalizeInterrupt = (data = {}) => ({
   message: String(data.message || '').trim(),
   actions: Array.isArray(data.actions) ? data.actions : [],
   selectedModelId: String(data.selected_model_id || data.selectedModelId || '').trim(),
-  modelOptions: Array.isArray(data.model_options || data.modelOptions) ? (data.model_options || data.modelOptions) : [],
-  scopeItemIds: normalizeSelectedItemIds(data.scope_item_ids || data.scopeItemIds)
+  modelOptions: Array.isArray(data.model_options || data.modelOptions) ? (data.model_options || data.modelOptions) : []
 })
 
 export const normalizeAssistantEvent = (rawEvent = {}) => {
@@ -60,20 +50,26 @@ export const normalizeAssistantEvent = (rawEvent = {}) => {
   if (type === 'agent.session.started') {
     return { kind: 'session', sessionId: String(data.session_id || '').trim() }
   }
-  if (type === 'agent.thinking.delta') {
-    return { kind: 'thinking', delta: String(data.delta || '') }
-  }
-  if (type === 'agent.step.started' || type === 'agent.step.completed') {
-    return { kind: 'step', step: normalizeStep(data) }
-  }
   if (type === 'agent.tool.call' || type === 'agent.tool.result') {
     return { kind: 'tool', toolCall: normalizeToolCall(data) }
   }
   if (type === 'agent.message.delta') {
     return { kind: 'message', message: normalizeMessage(data) }
   }
+  if (type === 'agent.message.completed') {
+    return { kind: 'message_completed', message: normalizeMessage(data) }
+  }
   if (type === 'agent.interrupt.requested') {
     return { kind: 'interrupt', interrupt: normalizeInterrupt(data) }
+  }
+  if (type === 'agent.interrupt.resolved') {
+    return {
+      kind: 'interrupt_resolved',
+      interrupt: {
+        interruptId: String(data.interrupt_id || data.interruptId || '').trim(),
+        decision: String(data.decision || '').trim()
+      }
+    }
   }
   if (type === 'agent.error') {
     return { kind: 'error', message: String(data.message || '').trim() }
@@ -184,8 +180,7 @@ const buildChatPayload = (payload = {}) => ({
   session_id: String(payload.sessionId || payload.session_id || '').trim() || undefined,
   message: String(payload.message || '').trim(),
   api_key_id: String(payload.apiKeyId || payload.api_key_id || '').trim() || undefined,
-  chat_model_id: String(payload.chatModelId || payload.chat_model_id || '').trim() || undefined,
-  selected_item_ids: normalizeSelectedItemIds(payload.selectedItemIds || payload.selected_item_ids)
+  chat_model_id: String(payload.chatModelId || payload.chat_model_id || '').trim() || undefined
 })
 
 const buildResumePayload = (payload = {}) => ({
@@ -193,8 +188,7 @@ const buildResumePayload = (payload = {}) => ({
   session_id: String(payload.sessionId || payload.session_id || '').trim(),
   interrupt_id: String(payload.interruptId || payload.interrupt_id || '').trim(),
   decision: String(payload.decision || '').trim(),
-  selected_model_id: String(payload.selectedModelId || payload.selected_model_id || '').trim() || undefined,
-  selected_item_ids: normalizeSelectedItemIds(payload.selectedItemIds || payload.selected_item_ids)
+  selected_model_id: String(payload.selectedModelId || payload.selected_model_id || '').trim() || undefined
 })
 
 export const canvasAssistantService = {

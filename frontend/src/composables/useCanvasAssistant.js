@@ -1,40 +1,44 @@
-import { computed, ref, unref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { canvasAssistantService } from '@/services/canvasAssistant'
 import { apiKeysService } from '@/services/apiKeys'
-
-const normalizeSelectedItemIds = (value) =>
-  [...new Set((Array.isArray(value) ? value : []).map((item) => String(item || '').trim()).filter(Boolean))]
+import { reduceCanvasAssistantEventLog } from '@/composables/useCanvasAssistantTimeline'
 
 const buildMessageId = (prefix, turnId) => `${prefix}-${turnId}-${Date.now()}`
 
 export function useCanvasAssistant({
   documentId = '',
-  selectedItemIds = [],
   service = canvasAssistantService,
   onMutationApplied = null
 } = {}) {
   const sessionId = ref('')
-  const status = ref('idle')
-  const error = ref('')
-  const messages = ref([])
-  const stepEvents = ref([])
-  const toolTrace = ref([])
-  const pendingInterrupt = ref(null)
-  const isStreaming = ref(false)
+  const runtimeError = ref('')
+  const eventLog = ref([])
   const apiKeysLoading = ref(false)
   const chatModelsLoading = ref(false)
   const apiKeyOptions = ref([])
   const chatModelOptions = ref([])
   const selectedApiKeyId = ref('')
   const selectedChatModelId = ref('')
-  const draftSelectedItemIds = ref([])
+  const pendingInterruptSelectedModelId = ref('')
   const currentTurnId = ref(0)
-  const currentAssistantMessageId = ref('')
   const abortController = ref(null)
-  const turnMutationApplied = ref(false)
+  const lastRefreshSignature = ref('')
 
-  const resolvedDocumentId = computed(() => String(unref(documentId) || '').trim())
-  const resolvedSelectedItemIds = computed(() => normalizeSelectedItemIds(unref(selectedItemIds)))
+  const resolvedDocumentId = computed(() => String(documentId?.value ?? documentId ?? '').trim())
+  const reducedState = computed(() =>
+    reduceCanvasAssistantEventLog({
+      eventLog: eventLog.value,
+      selectedModelId: pendingInterruptSelectedModelId.value
+    })
+  )
+
+  const messages = computed(() => reducedState.value.messages)
+  const pendingInterrupt = computed(() => reducedState.value.pendingInterrupt)
+  const error = computed(() => String(runtimeError.value || reducedState.value.fatalError || '').trim())
+  const status = computed(() => reducedState.value.status)
+  const isStreaming = computed(() => reducedState.value.isStreaming)
+  const activeTool = computed(() => reducedState.value.activeTool)
+  const refreshRequest = computed(() => reducedState.value.refreshRequest)
 
   const canSend = computed(
     () =>
@@ -98,180 +102,102 @@ export function useCanvasAssistant({
     }
   }
 
-  const appendMessage = (message) => {
-    const id = String(message.id || buildMessageId('message', currentTurnId.value)).trim()
-    const nextDelta = typeof message.delta === 'string' ? message.delta : ''
-    const nextMessage = {
-      id,
-      role: String(message.role || 'assistant').trim() === 'user' ? 'user' : 'assistant',
-      content: String(message.content ?? nextDelta ?? ''),
-      order: Number.isFinite(Number(message.order)) ? Number(message.order) : messages.value.length + 1
-    }
-    const existingIndex = messages.value.findIndex((item) => item.id === id)
-    if (existingIndex >= 0) {
-      messages.value = messages.value.map((item, index) =>
-        index === existingIndex
-          ? {
-              ...item,
-              ...nextMessage,
-              content: nextDelta && nextMessage.role === 'assistant'
-                ? `${String(item.content ?? '')}${nextDelta}`
-                : nextMessage.content || item.content
-            }
-          : item
-      )
-      return nextMessage
-    }
-    messages.value = [...messages.value, nextMessage]
-    return nextMessage
-  }
-
-  const upsertStep = (step = {}) => {
-    const id = String(step.id || buildMessageId('step', currentTurnId.value)).trim()
-    const nextStep = {
-      id,
-      title: String(step.title || '').trim(),
-      status: String(step.status || 'running').trim() || 'running',
-      order: Number.isFinite(Number(step.order)) ? Number(step.order) : stepEvents.value.length + 1
-    }
-    const existingIndex = stepEvents.value.findIndex((item) => item.id === id)
-    if (existingIndex >= 0) {
-      stepEvents.value = stepEvents.value.map((item, index) => (index === existingIndex ? { ...item, ...nextStep } : item))
-      return
-    }
-    stepEvents.value = [...stepEvents.value, nextStep]
-  }
-
-  const upsertToolCall = (toolCall = {}) => {
-    const id = String(toolCall.id || buildMessageId('tool', currentTurnId.value)).trim()
-    const nextTool = {
-      id,
-      toolName: String(toolCall.toolName || '').trim(),
-      status: String(toolCall.status || 'completed').trim() || 'completed',
-      args: toolCall.args ?? null,
-      result: toolCall.result ?? null,
-      order: Number.isFinite(Number(toolCall.order)) ? Number(toolCall.order) : toolTrace.value.length + 1
-    }
-    const existingIndex = toolTrace.value.findIndex((item) => item.id === id || item.toolName === nextTool.toolName)
-    if (existingIndex >= 0) {
-      toolTrace.value = toolTrace.value.map((item, index) => (index === existingIndex ? { ...item, ...nextTool } : item))
-      return
-    }
-    toolTrace.value = [...toolTrace.value, nextTool]
+  const appendEvent = (nextEvent) => {
+    if (!nextEvent || typeof nextEvent !== 'object') return
+    eventLog.value = [...eventLog.value, nextEvent]
   }
 
   const applyEvent = (event) => {
     if (!event || typeof event !== 'object') return
+    appendEvent(event)
     if (event.kind === 'session') {
       sessionId.value = String(event.sessionId || '').trim()
       return
     }
-    if (event.kind === 'thinking') {
-      upsertStep({ id: 'step-thinking', title: 'Thinking', status: 'running' })
-      return
-    }
-    if (event.kind === 'step') {
-      upsertStep(event.step || {})
-      return
-    }
-    if (event.kind === 'tool') {
-      const effect = event.toolCall?.result?.effect || event.toolCall?.result?.summary || event.toolCall?.result || null
-      if (
-        effect &&
-        typeof effect === 'object' &&
-        (effect.mutated === true ||
-          effect.created_item_ids?.length > 0 ||
-          effect.updated_item_ids?.length > 0 ||
-          effect.deleted_item_ids?.length > 0 ||
-          effect.created_connection_ids?.length > 0 ||
-          effect.deleted_connection_ids?.length > 0 ||
-          effect.submitted_task_ids?.length > 0)
-      ) {
-        turnMutationApplied.value = true
-      }
-      upsertToolCall(event.toolCall || {})
-      return
-    }
-    if (event.kind === 'message') {
-      const message = event.message || {}
-      if (message.role === 'assistant' && currentAssistantMessageId.value) {
-        appendMessage({ ...message, id: message.id || currentAssistantMessageId.value })
-      } else {
-        const normalized = appendMessage(message)
-        if (normalized.role === 'assistant') {
-          currentAssistantMessageId.value = normalized.id
-        }
-      }
-      return
-    }
     if (event.kind === 'interrupt') {
-      pendingInterrupt.value = {
-        interruptId: String(event.interrupt?.interruptId || '').trim(),
-        sessionId: String(event.interrupt?.sessionId || sessionId.value || '').trim(),
-        kind: String(event.interrupt?.kind || '').trim(),
-        title: String(event.interrupt?.title || '').trim(),
-        message: String(event.interrupt?.message || '').trim(),
-        actions: Array.isArray(event.interrupt?.actions) ? event.interrupt.actions : [],
-        selectedModelId: String(event.interrupt?.selectedModelId || '').trim(),
-        modelOptions: Array.isArray(event.interrupt?.modelOptions) ? event.interrupt.modelOptions : [],
-        scopeItemIds: normalizeSelectedItemIds(event.interrupt?.scopeItemIds || draftSelectedItemIds.value)
-      }
-      status.value = 'awaiting_interrupt'
+      pendingInterruptSelectedModelId.value = String(event.interrupt?.selectedModelId || '').trim()
+      return
+    }
+    if (event.kind === 'interrupt_resolved') {
+      pendingInterruptSelectedModelId.value = ''
       return
     }
     if (event.kind === 'error') {
-      error.value = String(event.message || 'assistant request failed').trim()
-      status.value = 'error'
-      isStreaming.value = false
-      return
-    }
-    if (event.kind === 'done') {
-      isStreaming.value = false
-      if (!pendingInterrupt.value) {
-        status.value = 'idle'
-      }
+      runtimeError.value = String(event.message || 'assistant request failed').trim()
     }
   }
+
+  watch(
+    refreshRequest,
+    async (nextValue, previousValue) => {
+      if (!nextValue || nextValue === previousValue) return
+      const signature = JSON.stringify(nextValue)
+      if (signature === lastRefreshSignature.value) return
+      lastRefreshSignature.value = signature
+      try {
+        await Promise.resolve(
+          onMutationApplied?.({
+            documentId: resolvedDocumentId.value,
+            sessionId: sessionId.value,
+            scopes: nextValue.scopes,
+            effect: nextValue.effect
+          })
+        )
+      } catch (refreshError) {
+        console.error('Refresh canvas after assistant mutation failed', refreshError)
+      }
+    },
+    { deep: true }
+  )
 
   const runTurn = async (turnRunner) => {
     abortController.value?.abort?.()
     abortController.value = new AbortController()
-    isStreaming.value = true
-    status.value = 'streaming'
-    error.value = ''
-    turnMutationApplied.value = false
+    runtimeError.value = ''
     try {
-      const result = await turnRunner(abortController.value.signal)
-      if (!pendingInterrupt.value && status.value === 'streaming') {
-        status.value = 'idle'
-      }
-      return result
+      return await turnRunner(abortController.value.signal)
     } catch (turnError) {
-      error.value = turnError?.message || 'assistant request failed'
-      status.value = 'error'
+      runtimeError.value = turnError?.message || 'assistant request failed'
       throw turnError
     } finally {
-      isStreaming.value = false
       abortController.value = null
+    }
+  }
+
+  const ensureChatContextReady = async () => {
+    if (!selectedApiKeyId.value) {
+      await loadApiKeys()
+    }
+    if (selectedApiKeyId.value && !selectedChatModelId.value) {
+      await loadChatModels(selectedApiKeyId.value)
+    }
+    if (!selectedApiKeyId.value || !selectedChatModelId.value) {
+      throw new Error('缺少对话 Key 或对话模型，未调用大模型。')
     }
   }
 
   const sendMessage = async (message) => {
     const trimmedMessage = String(message || '').trim()
-    if (!trimmedMessage || !canSend.value) {
+    if (!trimmedMessage || isStreaming.value || pendingInterrupt.value || !resolvedDocumentId.value) {
       return false
     }
 
-    const selectedItemIdsSnapshot = resolvedSelectedItemIds.value
-    draftSelectedItemIds.value = selectedItemIdsSnapshot
-    currentTurnId.value += 1
-    currentAssistantMessageId.value = ''
+    try {
+      await ensureChatContextReady()
+    } catch (contextError) {
+      runtimeError.value = contextError?.message || '缺少对话 Key 或对话模型'
+      return false
+    }
 
-    appendMessage({
-      id: buildMessageId('user', currentTurnId.value),
-      role: 'user',
-      content: trimmedMessage,
-      order: messages.value.length + 1
+    currentTurnId.value += 1
+    appendEvent({
+      kind: 'message',
+      message: {
+        id: buildMessageId('user', currentTurnId.value),
+        role: 'user',
+        content: trimmedMessage,
+        order: messages.value.length + 1
+      }
     })
 
     await runTurn((signal) =>
@@ -281,18 +207,18 @@ export function useCanvasAssistant({
           sessionId: sessionId.value,
           message: trimmedMessage,
           apiKeyId: selectedApiKeyId.value,
-          chatModelId: selectedChatModelId.value,
-          selectedItemIds: selectedItemIdsSnapshot
+          chatModelId: selectedChatModelId.value
         },
         { onEvent: applyEvent, signal }
       )
     )
+
     return true
   }
 
   const updatePendingInterruptModelId = (selectedModelId) => {
     if (!pendingInterrupt.value) return
-    pendingInterrupt.value = { ...pendingInterrupt.value, selectedModelId: String(selectedModelId || '').trim() }
+    pendingInterruptSelectedModelId.value = String(selectedModelId || '').trim()
   }
 
   const resumeInterrupt = async ({ decision = 'approve', selectedModelId = '' } = {}) => {
@@ -300,7 +226,6 @@ export function useCanvasAssistant({
       return false
     }
     const interruptSnapshot = pendingInterrupt.value
-    const selectedItemIdsSnapshot = interruptSnapshot.scopeItemIds.length > 0 ? interruptSnapshot.scopeItemIds : draftSelectedItemIds.value
     updatePendingInterruptModelId(selectedModelId)
     await runTurn((signal) =>
       service.resume(
@@ -309,58 +234,39 @@ export function useCanvasAssistant({
           sessionId: interruptSnapshot.sessionId || sessionId.value,
           interruptId: interruptSnapshot.interruptId,
           decision,
-          selectedModelId: pendingInterrupt.value.selectedModelId,
-          selectedItemIds: selectedItemIdsSnapshot
+          selectedModelId: pendingInterruptSelectedModelId.value
         },
         { onEvent: applyEvent, signal }
       )
     )
-    if (decision === 'approve' && turnMutationApplied.value) {
-      try {
-        await Promise.resolve(
-          onMutationApplied?.({
-            documentId: resolvedDocumentId.value,
-            selectedItemIds: selectedItemIdsSnapshot,
-            sessionId: interruptSnapshot.sessionId || sessionId.value,
-            interruptId: interruptSnapshot.interruptId
-          })
-        )
-      } catch (refreshError) {
-        console.error('Refresh canvas after assistant mutation failed', refreshError)
-      }
-    }
-    pendingInterrupt.value = null
-    status.value = 'idle'
+    appendEvent({
+      kind: 'interrupt_resolved',
+      interrupt: { interruptId: interruptSnapshot.interruptId, decision }
+    })
+    pendingInterruptSelectedModelId.value = ''
     return true
   }
 
   const reset = () => {
     abortController.value?.abort?.()
     sessionId.value = ''
-    status.value = 'idle'
-    error.value = ''
-    messages.value = []
-    stepEvents.value = []
-    toolTrace.value = []
-    pendingInterrupt.value = null
-    isStreaming.value = false
-    draftSelectedItemIds.value = []
+    runtimeError.value = ''
+    eventLog.value = []
+    pendingInterruptSelectedModelId.value = ''
     currentTurnId.value = 0
-    currentAssistantMessageId.value = ''
-    turnMutationApplied.value = false
+    lastRefreshSignature.value = ''
   }
 
   loadApiKeys().catch(() => {
-    error.value = '加载 assistant 对话模型失败'
+    runtimeError.value = '加载 assistant 对话模型失败'
   })
 
   return {
+    eventLog,
     sessionId,
     status,
     error,
     messages,
-    stepEvents,
-    toolTrace,
     pendingInterrupt,
     apiKeysLoading,
     chatModelsLoading,
@@ -370,6 +276,8 @@ export function useCanvasAssistant({
     selectedChatModelId,
     isStreaming,
     canSend,
+    activeTool,
+    refreshRequest,
     sendMessage,
     updateSelectedApiKeyId: async (apiKeyId) => {
       selectedApiKeyId.value = String(apiKeyId || '').trim()

@@ -40,7 +40,6 @@ async def test_canvas_assistant_chat_route_streams_agent_events(client, auth_hea
             json={
                 "document_id": "doc-1",
                 "message": "把这个节点改掉",
-                "selected_item_ids": ["item-1"],
             },
         )
     finally:
@@ -57,8 +56,8 @@ async def test_canvas_assistant_resume_route_streams_agent_events(client, auth_h
         session_id="session-1",
         message="已完成",
         events=[
-            {"type": "agent.tool.call", "data": {"tool_name": "canvas.update_items"}},
-            {"type": "agent.tool.result", "data": {"tool_name": "canvas.update_items", "result": {"updated": 1}}},
+            {"type": "agent.tool.call", "data": {"tool_name": "canvas.update_item"}},
+            {"type": "agent.tool.result", "data": {"tool_name": "canvas.update_item", "result": {"effect": {"updated_item_ids": ["item-1"]}}}},
             {"type": "agent.done", "data": {"session_id": "session-1"}},
         ],
         pending_interrupt=None,

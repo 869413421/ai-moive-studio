@@ -42,7 +42,6 @@
       >
         <CanvasAssistant
           :document-id="assistantDocumentId"
-          :selected-item-ids="selectedItemIds"
           :refresh-canvas="handleAssistantMutationApplied"
         />
       </CanvasWorkbenchLayout>
@@ -275,15 +274,15 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
       ) || null
   )
 
-  const handleAssistantMutationApplied = async ({ documentId, selectedItemIds: nextSelectedItemIds = [] } = {}) => {
+  const handleAssistantMutationApplied = async ({ documentId } = {}) => {
     const targetDocumentId = String(documentId || assistantDocumentId.value || '').trim()
     if (!targetDocumentId) {
       return
     }
-    const preservedSelectionId =
-      nextSelectedItemIds.find((itemId) => items.value.some((item) => item.id === itemId)) ||
-      selectedItem.value?.id ||
-      ''
+    if (dirty.value) {
+      await save()
+    }
+    const preservedSelectionId = selectedItem.value?.id || ''
     const preservedConnectionId = selectedConnectionId.value
     syncSelectedStudioDraft()
     await loadDocument(targetDocumentId)

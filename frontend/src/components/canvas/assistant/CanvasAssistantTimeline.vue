@@ -4,7 +4,7 @@
       <div v-if="!items.length" class="assistant-timeline__empty">
         <div class="assistant-timeline__empty-title">从一句话开始</div>
         <div class="assistant-timeline__empty-hint">
-          可以让助手检查选中节点、总结工具结果，或者确认一条执行计划。
+          直接说目标，Agent 会自己观察画布、推理下一步并执行动作。
         </div>
       </div>
 

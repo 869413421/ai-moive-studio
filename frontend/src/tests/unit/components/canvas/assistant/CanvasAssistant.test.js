@@ -40,26 +40,37 @@ describe('CanvasAssistant', () => {
       sessionId: ref('session-1'),
       status: ref('awaiting_interrupt'),
       error: ref(''),
+      eventLog: ref([
+        { kind: 'message', message: { id: 'm-1', role: 'user', content: '请看一下', order: 1 } },
+        {
+          kind: 'tool',
+          toolCall: {
+            id: 't-1',
+            toolName: 'canvas.find_items',
+            status: 'completed',
+            args: { query: '开场' },
+            result: { items: [{ id: 'item-1' }] },
+            order: 3
+          }
+        },
+        {
+          kind: 'interrupt',
+          interrupt: {
+            interruptId: 'interrupt-1',
+            sessionId: 'session-1',
+            kind: 'confirm_execute',
+            title: '确认执行',
+            message: '请选择模型后继续',
+            selectedModelId: '',
+            modelOptions: [
+              { modelId: 'model-a', label: '模型 A', resolution: '1024x1024' }
+            ],
+            actions: ['approve', 'reject']
+          }
+        }
+      ]),
       messages: ref([
         { id: 'm-1', role: 'user', content: '请看一下', order: 1 }
-      ]),
-      stepEvents: ref([
-        {
-          id: 'step-1',
-          title: 'Plan turn',
-          status: 'completed',
-          order: 2
-        }
-      ]),
-      toolTrace: ref([
-        {
-          id: 't-1',
-          toolName: 'canvas.update_items',
-          status: 'completed',
-          args: { updates: [{ itemId: 'item-1' }] },
-          result: { updated: 1 },
-          order: 3
-        }
       ]),
       pendingInterrupt: ref({
         interruptId: 'interrupt-1',
@@ -68,7 +79,6 @@ describe('CanvasAssistant', () => {
         title: '确认执行',
         message: '请选择模型后继续',
         selectedModelId: '',
-        scopeItemIds: ['item-1'],
         modelOptions: [
           { modelId: 'model-a', label: '模型 A', resolution: '1024x1024' }
         ],
@@ -100,25 +110,14 @@ describe('CanvasAssistant', () => {
           message: { role: 'user', content: '请看一下', order: 1 }
         },
         {
-          id: 'step-1',
-          type: 'activity',
-          activity: {
-            activityType: 'step',
-            title: 'Plan turn',
-            status: 'completed',
-            args: null,
-            result: null
-          }
-        },
-        {
           id: 't-1',
           type: 'activity',
           activity: {
             activityType: 'tool',
-            toolName: 'canvas.update_items',
+            toolName: 'canvas.find_items',
             status: 'completed',
-            args: { updates: [{ itemId: 'item-1' }] },
-            result: { updated: 1 }
+            args: { query: '开场' },
+            result: { items: [{ id: 'item-1' }] }
           }
         },
         {
@@ -130,7 +129,6 @@ describe('CanvasAssistant', () => {
             title: '确认执行',
             message: '请选择模型后继续',
             selectedModelId: '',
-            scopeItemIds: ['item-1'],
             modelOptions: [
               { modelId: 'model-a', label: '模型 A', resolution: '1024x1024' }
             ],
@@ -142,22 +140,22 @@ describe('CanvasAssistant', () => {
 
     const wrapper = mount(CanvasAssistant, {
       props: {
-        documentId: 'doc-1',
-        selectedItemIds: ['item-1']
+        documentId: 'doc-1'
       }
     })
 
+    expect(wrapper.attributes('style')).toContain('user-select: text')
     expect(wrapper.text()).toContain('AI 助手')
     expect(wrapper.text()).toContain('Session session-1')
     expect(wrapper.text()).toContain('请看一下')
-    expect(wrapper.text()).toContain('canvas.update_items')
+    expect(wrapper.text()).toContain('canvas.find_items')
     expect(wrapper.text()).toContain('确认执行')
     expect(wrapper.find('[data-testid="assistant-api-key-select"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="assistant-chat-model-select"]').exists()).toBe(true)
 
-    await wrapper.find('textarea').setValue('请处理选中的节点')
+    await wrapper.find('textarea').setValue('请删除开场节点')
     await wrapper.find('form').trigger('submit.prevent')
-    expect(sendMessage).toHaveBeenCalledWith('请处理选中的节点')
+    expect(sendMessage).toHaveBeenCalledWith('请删除开场节点')
 
     await wrapper.find('select').setValue('model-a')
     expect(updatePendingConfirmationModelId).toHaveBeenCalledWith('model-a')

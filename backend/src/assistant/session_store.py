@@ -15,12 +15,12 @@ def _session_from_payload(payload: dict[str, Any]) -> CanvasAgentSession:
         user_id=str(payload.get("user_id") or "").strip(),
         document_id=str(payload.get("document_id") or "").strip(),
         conversation=list(payload.get("conversation") or []),
-        selected_item_ids=list(payload.get("selected_item_ids") or []),
-        checkpoint_id=str(payload.get("checkpoint_id") or "").strip(),
-        checkpoint_state=dict(payload.get("checkpoint_state") or {}),
+        user_goal=str(payload.get("user_goal") or "").strip(),
+        graph_state=dict(payload.get("graph_state") or {}),
         pending_interrupt=AgentInterrupt(**pending_interrupt) if isinstance(pending_interrupt, dict) else None,
-        tool_trace=list(payload.get("tool_trace") or []),
+        tool_history=list(payload.get("tool_history") or []),
         resume_in_flight=bool(payload.get("resume_in_flight")),
+        status=str(payload.get("status") or "idle"),
     )
 
 
