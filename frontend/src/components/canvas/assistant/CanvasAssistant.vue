@@ -8,31 +8,23 @@
       :status="status"
       :session-id="sessionId"
       :can-reset="canReset"
-      :streaming="isStreaming"
+      :streaming="isAssistantBusy"
       @reset="handleReset"
     />
 
     <CanvasAssistantTimeline
       class="canvas-assistant__timeline"
       :items="timelineItems"
-      :busy="isStreaming"
+      :busy="isAssistantBusy"
       @approve="handleApprove"
       @reject="handleReject"
       @update:selected-model-id="handleUpdateSelectedModelId"
     />
 
-    <div v-if="showBottomStreamingGlow" class="canvas-assistant__stream-indicator" data-testid="assistant-stream-indicator">
-      <span class="canvas-assistant__stream-indicator-ring"></span>
-      <span class="canvas-assistant__stream-indicator-dot"></span>
-      <span class="canvas-assistant__stream-indicator-text">
-        {{ activeTool ? `正在执行 ${activeTool}` : 'Assistant 正在处理当前工作流' }}
-      </span>
-    </div>
-
     <CanvasAssistantComposer
       class="canvas-assistant__composer"
       :disabled="!canSend"
-      :loading="isStreaming"
+      :loading="isAssistantBusy"
       :placeholder="composerPlaceholder"
       :api-key-options="apiKeyOptions"
       :chat-model-options="chatModelOptions"
@@ -90,6 +82,9 @@
   const reset = assistant.reset
 
   const { timelineItems } = useCanvasAssistantTimeline(assistant)
+  const isAssistantBusy = computed(
+    () => Boolean(isStreaming.value || status.value === 'streaming')
+  )
 
   const canReset = computed(
     () =>
@@ -97,9 +92,6 @@
       messages.value.length > 0 ||
       Boolean(pendingInterrupt.value) ||
       Boolean(error.value)
-  )
-  const showBottomStreamingGlow = computed(
-    () => Boolean(isStreaming.value || activeTool.value || status.value === 'streaming')
   )
   const composerPlaceholder = computed(() => '描述你想让画布帮你完成的事情')
 
@@ -144,65 +136,4 @@
     flex: 0 0 auto;
   }
 
-  .canvas-assistant__stream-indicator {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 18px;
-    padding: 4px 2px 2px;
-    color: #4b78ff;
-  }
-
-  .canvas-assistant__stream-indicator-ring {
-    position: absolute;
-    left: -2px;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    background: radial-gradient(circle, rgba(75, 120, 255, 0.24), rgba(75, 120, 255, 0));
-    animation: canvas-assistant-stream-breathe 1.9s ease-in-out infinite;
-  }
-
-  .canvas-assistant__stream-indicator-dot {
-    position: relative;
-    z-index: 1;
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: #4b78ff;
-    box-shadow: 0 0 10px rgba(75, 120, 255, 0.55);
-    animation: canvas-assistant-stream-dot 1.2s ease-in-out infinite;
-  }
-
-  .canvas-assistant__stream-indicator-text {
-    position: relative;
-    z-index: 1;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.4;
-    color: #5a74a8;
-  }
-
-  @keyframes canvas-assistant-stream-breathe {
-    0%, 100% {
-      transform: scale(0.82);
-      opacity: 0.42;
-    }
-    50% {
-      transform: scale(1.16);
-      opacity: 1;
-    }
-  }
-
-  @keyframes canvas-assistant-stream-dot {
-    0%, 100% {
-      transform: scale(0.9);
-      opacity: 0.65;
-    }
-    50% {
-      transform: scale(1.08);
-      opacity: 1;
-    }
-  }
 </style>

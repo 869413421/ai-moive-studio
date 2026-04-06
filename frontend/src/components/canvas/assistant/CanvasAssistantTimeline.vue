@@ -14,6 +14,7 @@
             v-if="item.type === 'user_message' || item.type === 'assistant_message'"
             :message="item.message"
             :streaming="busy && item.type === 'assistant_message'"
+            :live="busy && item.type === 'assistant_message' && item.message?.id === lastAssistantMessageId"
           />
           <CanvasAssistantMessageItem
             v-else-if="item.type === 'error_notice'"
@@ -38,14 +39,6 @@
           :live="busy"
         />
       </div>
-
-      <div v-if="showLoading" class="assistant-timeline__loading">
-        <div class="assistant-timeline__loading-ring"></div>
-        <div class="assistant-dot-pulse">
-          <span></span><span></span><span></span>
-        </div>
-        <div class="assistant-timeline__loading-label">正在继续处理当前工作流</div>
-      </div>
     </div>
   </div>
 </template>
@@ -65,17 +58,36 @@
 
   const emit = defineEmits(['approve', 'reject', 'update:selected-model-id'])
   const scrollRef = ref(null)
-  const conversationItems = computed(() =>
-    (Array.isArray(props.items) ? props.items : []).filter((item) => item?.type !== 'tool_summary')
-  )
+  const conversationItems = computed(() => {
+    const list = (Array.isArray(props.items) ? props.items : []).filter((item) => item?.type !== 'tool_summary')
+    if (!props.busy) {
+      return list
+    }
+    const hasAssistantMessage = list.some((item) => item?.type === 'assistant_message')
+    if (hasAssistantMessage) {
+      return list
+    }
+    return [
+      ...list,
+      {
+        id: 'assistant-live-placeholder',
+        type: 'assistant_message',
+        order: (list[list.length - 1]?.order || 0) + 1,
+        message: {
+          id: 'assistant-live-placeholder',
+          role: 'assistant',
+          content: ''
+        }
+      }
+    ]
+  })
+  const lastAssistantMessageId = computed(() => {
+    const list = conversationItems.value.filter((item) => item?.type === 'assistant_message')
+    return list.length ? String(list[list.length - 1]?.message?.id || '') : ''
+  })
   const activitySummary = computed(() => {
     const summaries = (Array.isArray(props.items) ? props.items : []).filter((item) => item?.type === 'tool_summary')
     return summaries.length ? summaries[summaries.length - 1] : null
-  })
-  const showLoading = computed(() => {
-    if (props.busy) return true
-    const toolCalls = Array.isArray(activitySummary.value?.toolCalls) ? activitySummary.value.toolCalls : []
-    return toolCalls.some((toolCall) => !['completed', 'failed'].includes(String(toolCall?.status || '').trim()))
   })
 
   watch(
@@ -140,91 +152,7 @@
     flex-direction: column;
     gap: 12px;
   }
-
-  .assistant-timeline__loading {
-    position: sticky;
-    bottom: 0;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 42px;
-    margin-top: 4px;
-    padding: 12px 14px;
-    border-radius: 18px;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(243, 247, 255, 0.97));
-    border: 1px solid rgba(75, 120, 255, 0.14);
-    box-shadow:
-      0 12px 24px rgba(75, 120, 255, 0.10),
-      inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    overflow: hidden;
-  }
-
-  .assistant-timeline__loading-ring {
-    position: absolute;
-    left: 14px;
-    width: 22px;
-    height: 22px;
-    border-radius: 999px;
-    background: radial-gradient(circle, rgba(75, 120, 255, 0.22), rgba(75, 120, 255, 0));
-    animation: assistant-loading-breathe 1.8s ease-in-out infinite;
-  }
-
   .assistant-timeline__activity {
     padding-top: 4px;
-  }
-
-  .assistant-timeline__loading-label {
-    color: #58709c;
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.4;
-  }
-
-  .assistant-dot-pulse {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .assistant-dot-pulse span {
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    background: #4b78ff;
-    animation: assistant-dot-pulse 1.4s infinite ease-in-out both;
-  }
-
-  .assistant-dot-pulse span:nth-child(1) {
-    animation-delay: -0.32s;
-  }
-
-  .assistant-dot-pulse span:nth-child(2) {
-    animation-delay: -0.16s;
-  }
-
-  @keyframes assistant-dot-pulse {
-    0%, 80%, 100% {
-      transform: scale(0.32);
-      opacity: 0.35;
-    }
-    40% {
-      transform: scale(1);
-      opacity: 1;
-      box-shadow: 0 0 12px rgba(75, 120, 255, 0.55);
-    }
-  }
-
-  @keyframes assistant-loading-breathe {
-    0%, 100% {
-      transform: scale(0.88);
-      opacity: 0.45;
-    }
-    50% {
-      transform: scale(1.18);
-      opacity: 1;
-    }
   }
 </style>

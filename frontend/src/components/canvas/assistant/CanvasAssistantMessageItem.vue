@@ -5,11 +5,14 @@
       <span v-if="message.order !== undefined" class="assistant-message__order">#{{ message.order }}</span>
     </div>
     <div class="assistant-message__content">
-      {{ displayedContent || '（空消息）' }}
+      {{ displayedContent || contentFallback }}
       <span
         v-if="showCursor"
         class="assistant-message__cursor"
       ></span>
+      <span v-if="showWave" class="assistant-message__wave" aria-hidden="true">
+        <span></span><span></span><span></span><span></span>
+      </span>
     </div>
   </article>
 </template>
@@ -31,6 +34,10 @@
     streaming: {
       type: Boolean,
       default: false
+    },
+    live: {
+      type: Boolean,
+      default: false
     }
   })
 
@@ -50,6 +57,10 @@
   let finalizeTimerId = null
 
   const showCursor = computed(() => messageRole.value === 'assistant' && (props.streaming || animating.value))
+  const showWave = computed(() => messageRole.value === 'assistant' && props.live)
+  const contentFallback = computed(() =>
+    messageRole.value === 'assistant' && props.live ? '' : '（空消息）'
+  )
 
   const stopTypingLoop = () => {
     if (typingFrameId) {
@@ -195,6 +206,45 @@
     animation: assistant-message-cursor 0.82s step-end infinite;
   }
 
+  .assistant-message__wave {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 3px;
+    margin-left: 8px;
+    vertical-align: middle;
+    height: 12px;
+  }
+
+  .assistant-message__wave span {
+    display: inline-block;
+    width: 3px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: 0.75;
+    transform-origin: center bottom;
+    animation: assistant-message-wave 1.2s ease-in-out infinite;
+  }
+
+  .assistant-message__wave span:nth-child(1) {
+    height: 5px;
+    animation-delay: -0.45s;
+  }
+
+  .assistant-message__wave span:nth-child(2) {
+    height: 9px;
+    animation-delay: -0.3s;
+  }
+
+  .assistant-message__wave span:nth-child(3) {
+    height: 12px;
+    animation-delay: -0.15s;
+  }
+
+  .assistant-message__wave span:nth-child(4) {
+    height: 7px;
+    animation-delay: 0s;
+  }
+
   @keyframes assistant-message-cursor {
     0%,
     45% {
@@ -203,6 +253,18 @@
     46%,
     100% {
       opacity: 0;
+    }
+  }
+
+  @keyframes assistant-message-wave {
+    0%, 100% {
+      transform: scaleY(0.55);
+      opacity: 0.42;
+    }
+    50% {
+      transform: scaleY(1);
+      opacity: 1;
+      filter: drop-shadow(0 0 4px currentColor);
     }
   }
 </style>

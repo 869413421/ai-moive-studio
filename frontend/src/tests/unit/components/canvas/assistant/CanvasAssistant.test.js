@@ -174,7 +174,7 @@ describe('CanvasAssistant', () => {
     expect(reset).toHaveBeenCalled()
   })
 
-  it('renders streaming progress in timeline footer instead of animating header shell', () => {
+  it('renders a live assistant placeholder bubble with wave when status is streaming even before isStreaming flips true', () => {
     useCanvasAssistant.mockReturnValue({
       sessionId: ref('session-stream'),
       status: ref('streaming'),
@@ -188,7 +188,7 @@ describe('CanvasAssistant', () => {
       selectedChatModelId: ref('gpt-4o-mini'),
       apiKeysLoading: ref(false),
       chatModelsLoading: ref(false),
-      isStreaming: ref(true),
+      isStreaming: ref(false),
       canSend: ref(false),
       sendMessage: vi.fn(),
       updateSelectedApiKeyId: vi.fn(),
@@ -199,7 +199,13 @@ describe('CanvasAssistant', () => {
     })
 
     useCanvasAssistantTimeline.mockReturnValue({
-      timelineItems: computed(() => [])
+      timelineItems: computed(() => [
+        {
+          id: 'user-1',
+          type: 'user_message',
+          message: { id: 'user-1', role: 'user', content: '你好', order: 1 }
+        }
+      ])
     })
 
     const wrapper = mount(CanvasAssistant, {
@@ -208,9 +214,11 @@ describe('CanvasAssistant', () => {
       }
     })
 
-    expect(wrapper.find('.assistant-timeline__loading').exists()).toBe(true)
-    expect(wrapper.find('.assistant-timeline__loading-ring').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="assistant-stream-indicator"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="assistant-stream-indicator"]').exists()).toBe(false)
+    expect(wrapper.findAll('.assistant-message').length).toBe(2)
+    expect(wrapper.findAll('.assistant-message')[1].classes()).toContain('assistant-message--assistant')
+    expect(wrapper.find('.assistant-message__wave').exists()).toBe(true)
+    expect(wrapper.find('.assistant-composer__send').text()).toContain('处理中')
     expect(wrapper.find('.assistant-header').classes()).not.toContain('assistant-header--streaming')
   })
 })
