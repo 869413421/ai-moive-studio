@@ -5,9 +5,9 @@
       <span v-if="message.order !== undefined" class="assistant-message__order">#{{ message.order }}</span>
     </div>
     <div class="assistant-message__content">
-      {{ message.content || '（空消息）' }}
+      {{ displayedContent || '（空消息）' }}
       <span
-        v-if="streaming && messageRole === 'assistant'"
+        v-if="showCursor"
         class="assistant-message__cursor"
       ></span>
     </div>
@@ -15,7 +15,7 @@
 </template>
 
 <script setup>
-  import { computed } from 'vue'
+  import { computed, onBeforeUnmount, ref, watch } from 'vue'
 
   const props = defineProps({
     // message: 标准化后的时间线消息对象。
@@ -41,6 +41,95 @@
   const roleLabel = computed(() => {
     if (props.tone === 'error') return '错误'
     return messageRole.value === 'user' ? '你' : '助手'
+  })
+
+  const displayedContent = ref('')
+  const queuedContent = ref('')
+  const animating = ref(false)
+  let typingFrameId = null
+  let finalizeTimerId = null
+
+  const showCursor = computed(() => messageRole.value === 'assistant' && (props.streaming || animating.value))
+
+  const stopTypingLoop = () => {
+    if (typingFrameId) {
+      window.cancelAnimationFrame(typingFrameId)
+      typingFrameId = null
+    }
+  }
+
+  const clearFinalizeTimer = () => {
+    if (finalizeTimerId) {
+      window.clearTimeout(finalizeTimerId)
+      finalizeTimerId = null
+    }
+  }
+
+  const startTypingLoop = () => {
+    if (typingFrameId || messageRole.value !== 'assistant') {
+      return
+    }
+    animating.value = true
+
+    const loop = () => {
+      const target = String(queuedContent.value || '')
+      if (messageRole.value !== 'assistant') {
+        displayedContent.value = target
+        animating.value = false
+        typingFrameId = null
+        return
+      }
+      if (!target.startsWith(displayedContent.value)) {
+        displayedContent.value = ''
+      }
+      if (displayedContent.value.length < target.length) {
+        const gap = target.length - displayedContent.value.length
+        const step = Math.max(1, Math.min(4, Math.floor(gap / 8) || 1))
+        displayedContent.value = target.slice(0, displayedContent.value.length + step)
+        typingFrameId = window.requestAnimationFrame(loop)
+        return
+      }
+      clearFinalizeTimer()
+      finalizeTimerId = window.setTimeout(() => {
+        animating.value = false
+        finalizeTimerId = null
+      }, props.streaming ? 0 : 320)
+      typingFrameId = null
+    }
+
+    typingFrameId = window.requestAnimationFrame(loop)
+  }
+
+  const syncDisplayedContent = (nextContent) => {
+    const normalized = String(nextContent || '')
+    if (messageRole.value !== 'assistant') {
+      queuedContent.value = normalized
+      displayedContent.value = normalized
+      animating.value = false
+      return
+    }
+    if (!normalized.startsWith(queuedContent.value || displayedContent.value)) {
+      displayedContent.value = ''
+      queuedContent.value = normalized
+    } else {
+      queuedContent.value = normalized
+    }
+    startTypingLoop()
+  }
+
+  watch(
+    () => [props.message?.content, props.streaming, messageRole.value],
+    ([nextContent]) => {
+      stopTypingLoop()
+      clearFinalizeTimer()
+      syncDisplayedContent(nextContent)
+    },
+    { immediate: true }
+  )
+
+  onBeforeUnmount(() => {
+    stopTypingLoop()
+    clearFinalizeTimer()
   })
 </script>
 
@@ -97,12 +186,13 @@
 
   .assistant-message__cursor {
     display: inline-block;
-    width: 8px;
+    width: 10px;
     height: 1em;
-    margin-left: 2px;
+    margin-left: 4px;
     vertical-align: text-bottom;
     border-right: 2px solid currentColor;
-    animation: assistant-message-cursor 0.9s step-end infinite;
+    filter: drop-shadow(0 0 6px currentColor);
+    animation: assistant-message-cursor 0.82s step-end infinite;
   }
 
   @keyframes assistant-message-cursor {

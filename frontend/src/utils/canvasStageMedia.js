@@ -154,7 +154,7 @@ function stripRichText(value = '') {
 }
 
 export const resolveCanvasRichTextHtml = (item) => {
-  const value = String(item?.content?.text || item?.content?.text_preview || item?.content?.prompt || '')
+  const value = String(item?.content?.text || item?.content?.draft_text || item?.content?.text_preview || item?.content?.prompt || '')
   if (!value.trim()) {
     return ''
   }
@@ -168,7 +168,7 @@ export const resolveCanvasRichTextHtml = (item) => {
 }
 
 export const resolveCanvasTextPreview = (item) =>
-  stripRichText(item?.content?.text || item?.content?.text_preview || item?.content?.prompt || '')
+  stripRichText(item?.content?.text || item?.content?.draft_text || item?.content?.text_preview || item?.content?.prompt || '')
 
 export const resolveCanvasStageMediaUrl = (item) => {
   if (!item) {

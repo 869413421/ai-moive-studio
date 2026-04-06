@@ -15,11 +15,13 @@ from src.assistant.agent_factory import CanvasAssistantAgentFactory
 from src.assistant.service import CanvasAssistantService
 from src.assistant.session_store import InMemoryCanvasAssistantSessionStore, RedisCanvasAssistantSessionStore
 from src.assistant.sse import encode_sse_event
+from src.assistant.workflow_service import CanvasAssistantWorkflowService
 from src.assistant.tools.canvas_tools import CanvasAssistantCanvasExecutionTools, CanvasAssistantCanvasInspectionTools
 from src.assistant.tools.generation_tools import CanvasAssistantGenerationTools
 from src.core.config import settings
 from src.core.database import get_db
 from src.models.user import User
+from src.services.api_key import APIKeyService
 from src.services.canvas import CanvasGenerationService, CanvasService
 
 router = APIRouter()
@@ -40,10 +42,19 @@ def _get_redis_client():
 
 def get_canvas_assistant_service(db: AsyncSession = Depends(get_db)) -> CanvasAssistantService:
     canvas_service = CanvasService(db)
+    generation_service = CanvasGenerationService(db)
     inspection_tools = CanvasAssistantCanvasInspectionTools(canvas_service)
     redis_client = _get_redis_client()
     generation_tools = CanvasAssistantGenerationTools(
-        generation_service=CanvasGenerationService(db),
+        generation_service=generation_service,
+        dispatch_text=dispatch_canvas_text_generation,
+        dispatch_image=dispatch_canvas_image_generation,
+        dispatch_video=dispatch_canvas_video_generation,
+    )
+    workflow_service = CanvasAssistantWorkflowService(
+        canvas_service=canvas_service,
+        generation_service=generation_service,
+        api_key_service=APIKeyService(db),
         dispatch_text=dispatch_canvas_text_generation,
         dispatch_image=dispatch_canvas_image_generation,
         dispatch_video=dispatch_canvas_video_generation,
@@ -53,6 +64,7 @@ def get_canvas_assistant_service(db: AsyncSession = Depends(get_db)) -> CanvasAs
         inspection_tools=inspection_tools,
         canvas_execution_tools=CanvasAssistantCanvasExecutionTools(canvas_service),
         generation_tools=generation_tools,
+        workflow_service=workflow_service,
     )
     return CanvasAssistantService(
         session_store=RedisCanvasAssistantSessionStore(redis_client) if redis_client is not None else InMemoryCanvasAssistantSessionStore(),

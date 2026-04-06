@@ -16,6 +16,7 @@ from pydantic import ConfigDict, PrivateAttr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.assistant.serialization import to_jsonable
+from src.assistant.workflow_service import CanvasAssistantWorkflowService
 from src.assistant.tools.canvas_tools import CanvasAssistantCanvasExecutionTools, CanvasAssistantCanvasInspectionTools
 from src.assistant.tools.generation_tools import CanvasAssistantGenerationTools
 from src.services.api_key import APIKeyService
@@ -41,6 +42,16 @@ SYSTEM_PROMPT = (
     "同一个工具调用如果在当前回合失败一次，不要原样重试；你必须换参数、换工具或回到澄清。"
     "删除和破坏性动作属于高风险操作，必须经过人工确认。"
     "常见链路包括：创意/故事→剧本→分镜→图片→视频；角色设定→角色图→镜头图→视频；参考图→提示词→视频提示词→视频。"
+    "如果上下文里给出了 workflow.target_stages，你必须把它视为本轮主链路意图，优先围绕这些阶段选择工具与组织输出。"
+    "当任务属于视频创作主链路（剧本、预备节点、角色三视图、关键帧、视频）时，优先使用 workflow_* 工具，禁止直接用 canvas_create_item 伪造占位节点。"
+    "如果 workflow.parameters 里已经有参数，就视为用户已经确认过，不要重复索取。"
+    "如果缺少 workflow_* 工具所需参数，先向用户追问最小缺失信息，不要调用低层画布工具硬创建空节点。"
+    "如果 workflow.missing_fields 非空，绝对不要调用 workflow_prepare_script；先告诉用户还缺哪些字段。"
+    "当目标涉及剧本、预备节点、角色三视图、关键帧、视频时，优先按阶段推进：先补前置资产，再推进下游生成。"
+    "如果用户要求继续执行，或者说“继续”“下一步”“那怎么办”，默认基于现有节点和上次中断前的目标续跑，不要回退到无关阶段。"
+    "在生成角色三视图、关键帧、视频前，要优先检查是否已有可复用的角色、参考图、分镜或关键帧节点。"
+    "旧系统的刚性规则必须保留：剧本阶段锁定 idea、script_type、style_id、language、duration_target、shot_duration_seconds；角色阶段输出稳定角色名和 three_view_prompt；分镜阶段输出 storyboard_text、keyframe_prompt、video_prompt。"
+    "当任务涉及多阶段工作流时，先 inspect/locate，再批量创建或提交生成，最后总结当前已完成阶段和下一阶段。"
 )
 
 
@@ -210,6 +221,7 @@ class CanvasAssistantToolCallingChatModel(BaseChatModel):
     user_id: str
     document_id: str
     observation_summary: dict[str, Any]
+    workflow_summary: dict[str, Any]
     api_key_service: APIKeyService
     provider_factory: Any = ProviderFactory
     _bound_tools: list[Any] = PrivateAttr(default_factory=list)
@@ -237,6 +249,7 @@ class CanvasAssistantToolCallingChatModel(BaseChatModel):
             {
                 "document_id": self.document_id,
                 "observation": self.observation_summary,
+                "workflow": self.workflow_summary,
             }
         )
         tool_catalog = [
@@ -289,12 +302,14 @@ class CanvasAssistantAgentFactory:
         inspection_tools: CanvasAssistantCanvasInspectionTools,
         canvas_execution_tools: CanvasAssistantCanvasExecutionTools,
         generation_tools: CanvasAssistantGenerationTools,
+        workflow_service: CanvasAssistantWorkflowService | None = None,
         checkpointer: Any | None = None,
     ) -> None:
         self.db_session = db_session
         self.inspection_tools = inspection_tools
         self.canvas_execution_tools = canvas_execution_tools
         self.generation_tools = generation_tools
+        self.workflow_service = workflow_service
         self.api_key_service = APIKeyService(db_session)
         self.checkpointer = checkpointer or InMemorySaver()
         self._graph = None
@@ -334,6 +349,7 @@ class CanvasAssistantAgentFactory:
             user_id=str(context.get("user_id") or ""),
             document_id=str(context.get("document_id") or ""),
             observation_summary=dict(context.get("observation") or {}),
+            workflow_summary=dict(context.get("workflow") or {}),
             api_key_service=self.api_key_service,
         ).bind_tools(self._build_tools())
 
@@ -341,6 +357,7 @@ class CanvasAssistantAgentFactory:
         inspection_tools = self.inspection_tools
         execution_tools = self.canvas_execution_tools
         generation_tools = self.generation_tools
+        workflow_service = self.workflow_service
 
         def _config() -> dict[str, Any]:
             return dict(get_config().get("configurable") or {})
@@ -359,6 +376,216 @@ class CanvasAssistantAgentFactory:
             if isinstance(payload, dict):
                 return payload
             return {"decision": str(payload or "").strip()}
+
+        @tool
+        async def workflow_get_status() -> dict[str, Any]:
+            """读取当前视频工作流进度。用于判断当前画布是否已有剧本、角色三视图、分镜、关键帧或视频节点，以及下一步推荐做什么。视频创作主链路开始前或续跑前应优先调用。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.get_workflow_status(conf["document_id"], conf["user_id"])
+            return {
+                **to_jsonable(result),
+                "display": {"level": "info", "title": "已读取工作流状态", "message": "可继续决定下一阶段"},
+                "audit": {"tool_name": "workflow.get_status", "target_ids": [], "risk_level": "low"},
+                "error": None,
+            }
+
+        @tool
+        async def workflow_prepare_script(
+            idea: str = "",
+            script_type: str = "",
+            style_id: str = "",
+            language: str = "",
+            duration_target: str = "",
+            shot_duration_seconds: int = 0,
+            dialogue_mode: str = "",
+            tone: str = "",
+            constraints: list[str] | None = None,
+            creative_spec: dict[str, Any] | None = None,
+            title: str = "",
+            script_item_id: str = "",
+        ) -> dict[str, Any]:
+            """生成剧本节点。只有在用户已经给出创意、脚本类型、视觉风格、语言、总时长和单镜头秒数时才调用；缺字段时先追问，不要硬创建空白剧本节点。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.prepare_script(
+                document_id=conf["document_id"],
+                user_id=conf["user_id"],
+                api_key_id=str(conf.get("api_key_id") or ""),
+                chat_model_id=str(conf.get("chat_model_id") or ""),
+                input_data={
+                    "idea": idea,
+                    "script_type": script_type,
+                    "style_id": style_id,
+                    "language": language,
+                    "duration_target": duration_target,
+                    "shot_duration_seconds": shot_duration_seconds,
+                    "dialogue_mode": dialogue_mode,
+                    "tone": tone,
+                    "constraints": list(constraints or []),
+                    "creative_spec": dict(creative_spec or {}),
+                    "title": title,
+                    "script_item_id": script_item_id,
+                },
+            )
+            normalized = to_jsonable(result)
+            return {
+                **normalized,
+                "effect": {
+                    **dict(normalized.get("effect") or {}),
+                    "needs_refresh": bool((normalized.get("effect") or {}).get("mutated")),
+                    "refresh_scopes": ["document"] if (normalized.get("effect") or {}).get("mutated") else [],
+                    "side_effects": [],
+                },
+                "display": {"level": "info", "title": "剧本阶段", "message": str(normalized.get("summary") or "")},
+                "audit": {
+                    "tool_name": "workflow.prepare_script",
+                    "target_ids": list((normalized.get("effect") or {}).get("created_item_ids") or []) + list((normalized.get("effect") or {}).get("updated_item_ids") or []),
+                    "risk_level": "medium",
+                },
+                "error": None,
+            }
+
+        @tool
+        async def workflow_prepare_from_script(script_item_id: str) -> dict[str, Any]:
+            """基于已确认剧本继续生成角色三视图、分镜、关键帧和视频占位节点。只在已有剧本节点时调用，不要跳过剧本阶段直接造节点。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.prepare_workflow_from_script(
+                document_id=conf["document_id"],
+                user_id=conf["user_id"],
+                api_key_id=str(conf.get("api_key_id") or ""),
+                chat_model_id=str(conf.get("chat_model_id") or ""),
+                script_item_id=script_item_id,
+            )
+            normalized = to_jsonable(result)
+            return {
+                **normalized,
+                "effect": {
+                    **dict(normalized.get("effect") or {}),
+                    "needs_refresh": bool((normalized.get("effect") or {}).get("mutated")),
+                    "refresh_scopes": ["document"] if (normalized.get("effect") or {}).get("mutated") else [],
+                    "side_effects": [],
+                },
+                "display": {"level": "info", "title": "工作流预备阶段", "message": str(normalized.get("summary") or "")},
+                "audit": {
+                    "tool_name": "workflow.prepare_from_script",
+                    "target_ids": list((normalized.get("effect") or {}).get("created_item_ids") or []),
+                    "risk_level": "medium",
+                },
+                "error": None,
+            }
+
+        @tool
+        async def workflow_generate_character_views(item_ids: list[str] | None = None, model: str = "") -> dict[str, Any]:
+            """为角色三视图节点批量提交生成任务。只用于 workflow.prepare_from_script 已创建的角色三视图节点。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.generate_character_views(
+                document_id=conf["document_id"],
+                user_id=conf["user_id"],
+                api_key_id=str(conf.get("api_key_id") or ""),
+                chat_model_id=str(conf.get("chat_model_id") or ""),
+                item_ids=item_ids,
+                model=model,
+            )
+            normalized = to_jsonable(result)
+            return {
+                **normalized,
+                "effect": {
+                    **dict(normalized.get("effect") or {}),
+                    "needs_refresh": bool((normalized.get("effect") or {}).get("submitted_task_ids")),
+                    "refresh_scopes": ["document", "generation_history"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                    "side_effects": ["generation_task_submitted"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                },
+                "display": {"level": "info", "title": "角色三视图任务", "message": str(normalized.get("summary") or "")},
+                "audit": {"tool_name": "workflow.generate_character_views", "target_ids": [], "risk_level": "medium"},
+                "error": None,
+            }
+
+        @tool
+        async def workflow_generate_keyframes(item_ids: list[str] | None = None, model: str = "") -> dict[str, Any]:
+            """为关键帧节点批量提交生成任务。只用于 workflow.prepare_from_script 已创建的关键帧节点。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.generate_keyframes(
+                document_id=conf["document_id"],
+                user_id=conf["user_id"],
+                api_key_id=str(conf.get("api_key_id") or ""),
+                chat_model_id=str(conf.get("chat_model_id") or ""),
+                item_ids=item_ids,
+                model=model,
+            )
+            normalized = to_jsonable(result)
+            return {
+                **normalized,
+                "effect": {
+                    **dict(normalized.get("effect") or {}),
+                    "needs_refresh": bool((normalized.get("effect") or {}).get("submitted_task_ids")),
+                    "refresh_scopes": ["document", "generation_history"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                    "side_effects": ["generation_task_submitted"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                },
+                "display": {"level": "info", "title": "关键帧任务", "message": str(normalized.get("summary") or "")},
+                "audit": {"tool_name": "workflow.generate_keyframes", "target_ids": [], "risk_level": "medium"},
+                "error": None,
+            }
+
+        @tool
+        async def workflow_generate_videos(item_ids: list[str] | None = None, model: str = "") -> dict[str, Any]:
+            """为视频节点批量提交生成任务。只用于 workflow.prepare_from_script 已创建的视频节点。"""
+            if workflow_service is None:
+                return {
+                    "ok": False,
+                    "summary": "workflow service unavailable",
+                    "effect": {"mutated": False, "needs_refresh": False, "refresh_scopes": [], "side_effects": []},
+                }
+            conf = _config()
+            result = await workflow_service.generate_videos(
+                document_id=conf["document_id"],
+                user_id=conf["user_id"],
+                api_key_id=str(conf.get("api_key_id") or ""),
+                chat_model_id=str(conf.get("chat_model_id") or ""),
+                item_ids=item_ids,
+                model=model,
+            )
+            normalized = to_jsonable(result)
+            return {
+                **normalized,
+                "effect": {
+                    **dict(normalized.get("effect") or {}),
+                    "needs_refresh": bool((normalized.get("effect") or {}).get("submitted_task_ids")),
+                    "refresh_scopes": ["document", "generation_history"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                    "side_effects": ["generation_task_submitted"] if (normalized.get("effect") or {}).get("submitted_task_ids") else [],
+                },
+                "display": {"level": "info", "title": "视频任务", "message": str(normalized.get("summary") or "")},
+                "audit": {"tool_name": "workflow.generate_videos", "target_ids": [], "risk_level": "high"},
+                "error": None,
+            }
 
         @tool
         async def canvas_find_items(query: str) -> dict[str, Any]:
@@ -608,6 +835,12 @@ class CanvasAssistantAgentFactory:
             }
 
         return [
+            workflow_get_status,
+            workflow_prepare_script,
+            workflow_prepare_from_script,
+            workflow_generate_character_views,
+            workflow_generate_keyframes,
+            workflow_generate_videos,
             canvas_find_items,
             canvas_read_item_detail,
             canvas_read_neighbors,

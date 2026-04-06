@@ -43,6 +43,11 @@ const normalizeInterrupt = (data = {}) => ({
   modelOptions: Array.isArray(data.model_options || data.modelOptions) ? (data.model_options || data.modelOptions) : []
 })
 
+const normalizeThinking = (data = {}) => ({
+  content: String(data.content ?? data.delta ?? data.message ?? ''),
+  order: Number.isFinite(Number(data.order)) ? Number(data.order) : undefined
+})
+
 export const normalizeAssistantEvent = (rawEvent = {}) => {
   const type = String(rawEvent.type || rawEvent.event || '').trim()
   const data = rawEvent.data ?? rawEvent.payload ?? {}
@@ -55,6 +60,9 @@ export const normalizeAssistantEvent = (rawEvent = {}) => {
   }
   if (type === 'agent.message.delta') {
     return { kind: 'message', message: normalizeMessage(data) }
+  }
+  if (type === 'agent.thinking.delta') {
+    return { kind: 'thinking', thinking: normalizeThinking(data) }
   }
   if (type === 'agent.message.completed') {
     return { kind: 'message_completed', message: normalizeMessage(data) }

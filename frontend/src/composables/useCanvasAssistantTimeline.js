@@ -34,6 +34,17 @@ const normalizeActivityTimelineItem = (activity = {}, fallbackOrder = 0) => ({
   }
 })
 
+const normalizeToolSummaryItem = (
+  { thinkingBuffer = '', toolCalls = [], order = 0 } = {},
+  fallbackOrder = 0
+) => ({
+  id: 'tool-summary',
+  type: 'tool_summary',
+  order: readOrder(order, fallbackOrder),
+  thinkingBuffer: String(thinkingBuffer || '').trim(),
+  toolCalls: Array.isArray(toolCalls) ? toolCalls : []
+})
+
 const normalizeInterruptItem = (interrupt = {}, fallbackOrder = 0) => ({
   id: String(interrupt.interruptId || `interrupt-${fallbackOrder}`).trim(),
   type: 'interrupt_card',
@@ -60,6 +71,8 @@ const normalizeErrorItem = (message = '', order = Number.MAX_SAFE_INTEGER) => ({
 export const reduceCanvasAssistantEventLog = ({ eventLog = [], selectedModelId = '' } = {}) => {
   const messages = []
   const activities = []
+  let thinkingBuffer = ''
+  let thinkingOrder = 0
   let pendingInterrupt = null
   let refreshRequest = null
   let activeTool = null
@@ -83,6 +96,12 @@ export const reduceCanvasAssistantEventLog = ({ eventLog = [], selectedModelId =
         content: typeof message.delta === 'string' ? `${String(previous.content || '')}${message.delta}` : normalized.content
       }
       return
+    }
+    if (normalized.role === 'user') {
+      thinkingBuffer = ''
+      thinkingOrder = normalized.order
+      activities.splice(0, activities.length)
+      activeTool = null
     }
     messages.push(normalized)
   }
@@ -119,6 +138,19 @@ export const reduceCanvasAssistantEventLog = ({ eventLog = [], selectedModelId =
         if (event.kind === 'message_completed') {
           isStreaming = false
         }
+        break
+      case 'thinking':
+        {
+          const chunk = String(event.thinking?.content || '').trim()
+          if (chunk && !thinkingBuffer.endsWith(chunk)) {
+            thinkingBuffer += chunk
+          }
+        }
+        if (!thinkingOrder) {
+          thinkingOrder = readOrder(event.thinking?.order, event.order)
+        }
+        status = 'streaming'
+        isStreaming = true
         break
       case 'tool':
         upsertActivity(event.toolCall || {})
@@ -176,6 +208,8 @@ export const reduceCanvasAssistantEventLog = ({ eventLog = [], selectedModelId =
   return {
     messages: [...messages].sort((left, right) => readOrder(left.order) - readOrder(right.order)),
     timelineActivities: [...activities].sort((left, right) => readOrder(left.order) - readOrder(right.order)),
+    thinkingBuffer,
+    thinkingOrder,
     pendingInterrupt,
     refreshRequest,
     activeTool,
@@ -191,18 +225,33 @@ export const buildCanvasAssistantTimelineItems = ({ eventLog = [] } = {}) => {
   const items = [
     ...(Array.isArray(reduced.messages) ? reduced.messages : []).map((message, index) =>
       normalizeMessageTimelineItem(message, index + 1)
-    ),
-    ...(Array.isArray(reduced.timelineActivities) ? reduced.timelineActivities : []).map((activity, index) =>
-      normalizeActivityTimelineItem(activity, reduced.messages.length + index + 1)
     )
   ]
+  if (String(reduced.thinkingBuffer || '').trim() || (Array.isArray(reduced.timelineActivities) && reduced.timelineActivities.length > 0)) {
+    const toolSummaryItem = normalizeToolSummaryItem(
+      {
+        thinkingBuffer: reduced.thinkingBuffer,
+        toolCalls: reduced.timelineActivities,
+        order: reduced.thinkingOrder || reduced.timelineActivities[0]?.order || items.length + 1
+      },
+      items.length + 1
+    )
+    const insertIndex = items.findIndex(
+      (item) => item.type === 'assistant_message' && readOrder(item.order, 0) >= readOrder(toolSummaryItem.order, 0)
+    )
+    if (insertIndex >= 0) {
+      items.splice(insertIndex, 0, toolSummaryItem)
+    } else {
+      items.push(toolSummaryItem)
+    }
+  }
   if (reduced.pendingInterrupt) {
-    items.push(normalizeInterruptItem(reduced.pendingInterrupt, items.length + 1))
+    items.push(normalizeInterruptItem({ ...reduced.pendingInterrupt, order: items.length + 1 }, items.length + 1))
   }
   if (String(reduced.fatalError || '').trim()) {
     items.push(normalizeErrorItem(reduced.fatalError, items.length + 1))
   }
-  return [...items].sort((left, right) => readOrder(left.order) - readOrder(right.order))
+  return items
 }
 
 export function useCanvasAssistantTimeline(source = {}) {

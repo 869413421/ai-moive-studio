@@ -4,7 +4,7 @@ import pytest
 from langgraph.types import Command
 
 from src.api.schemas.canvas_assistant import CanvasAssistantChatRequest, CanvasAssistantResumeRequest
-from src.assistant.service import CanvasAssistantService
+from src.assistant.service import CanvasAssistantService, _build_workflow_context, _extract_workflow_draft
 from src.assistant.sse import encode_sse_event
 from src.assistant.types import CanvasAgentSession
 
@@ -39,6 +39,35 @@ class _FakeAgentGraph:
 def test_sse_event_writer_serializes_agent_event() -> None:
     body = encode_sse_event("agent.message.delta", {"delta": "hello"})
     assert body == 'data: {"type":"agent.message.delta","data":{"delta":"hello"}}\n\n'
+
+
+def test_extract_workflow_draft_accumulates_old_workflow_slots_from_conversation() -> None:
+    draft = _extract_workflow_draft(
+        [
+            {"role": "user", "content": "做一个像《沙丘》一样的史诗感荒漠预告片，画面是低饱和赭石与废土沙色调，强调 70MM IMAX 胶片感和长焦压缩空间。"},
+            {"role": "assistant", "content": "请提供总时长和单镜头秒数。"},
+            {"role": "user", "content": "总时长 60 秒，单镜头 3 秒。"},
+        ]
+    )
+
+    assert draft["script_type"] == "trailer"
+    assert draft["style_id"] == "cinematic"
+    assert draft["language"] == "中文"
+    assert draft["duration_target"] == "60s"
+    assert draft["shot_duration_seconds"] == 3
+    assert "沙丘" in draft["idea"]
+
+
+def test_build_workflow_context_reports_missing_fields_from_draft() -> None:
+    workflow = _build_workflow_context(
+        "帮我生成剧本",
+        {"canvas": {"items": []}},
+        workflow_draft={"idea": "荒漠史诗预告片", "script_type": "trailer", "language": "中文"},
+    )
+
+    assert workflow["target_stages"] == ["script"]
+    assert "style_id" in workflow["missing_fields"]
+    assert "duration_target" in workflow["missing_fields"]
 
 
 @pytest.mark.asyncio
@@ -118,7 +147,7 @@ async def test_chat_uses_official_agent_and_emits_normalized_events() -> None:
     result = await service.chat(
         CanvasAssistantChatRequest(
             document_id="doc-1",
-            message="查找开场节点",
+            message="先生成剧本，再继续角色三视图和关键帧",
             api_key_id="key-1",
             chat_model_id="model-1",
         ),
@@ -129,22 +158,31 @@ async def test_chat_uses_official_agent_and_emits_normalized_events() -> None:
     assert fake_graph.calls[0]["stream_mode"] == "updates"
     assert fake_graph.calls[0]["config"]["configurable"]["thread_id"] == "session-1"
     assert fake_graph.calls[0]["context"]["observation"]["canvas"]["document"]["id"] == "doc-1"
+    assert fake_graph.calls[0]["context"]["workflow"]["target_stages"] == [
+        "script",
+        "character_views",
+        "keyframes",
+    ]
     assert [event["type"] for event in result.events] == [
         "agent.session.started",
+        "agent.thinking.delta",
         "agent.tool.call",
         "agent.tool.result",
         "agent.message.delta",
         "agent.message.completed",
         "agent.done",
     ]
-    tool_call_event = result.events[1]["data"]
-    tool_result_event = result.events[2]["data"]
+    thinking_event = result.events[1]["data"]
+    tool_call_event = result.events[2]["data"]
+    tool_result_event = result.events[3]["data"]
     done_event = result.events[-1]["data"]
+    assert "剧本" in thinking_event["delta"]
+    assert "角色三视图" in thinking_event["delta"]
     assert tool_call_event["correlation_id"] == "call-1"
     assert tool_result_event["correlation_id"] == "call-1"
     assert tool_result_event["effect"]["needs_refresh"] is False
     assert done_event["event_id"]
-    assert done_event["sequence"] == 6
+    assert done_event["sequence"] == 7
     assert done_event["run_id"] == tool_call_event["run_id"]
     assert result.message == "已找到开场节点。"
 
@@ -253,6 +291,7 @@ async def test_chat_interrupt_and_resume_stay_on_official_agent_path() -> None:
 
     assert [event["type"] for event in interrupted.events] == [
         "agent.session.started",
+        "agent.thinking.delta",
         "agent.interrupt.requested",
         "agent.done",
     ]
@@ -261,14 +300,17 @@ async def test_chat_interrupt_and_resume_stay_on_official_agent_path() -> None:
     assert [event["type"] for event in resumed.events] == [
         "agent.session.started",
         "agent.interrupt.resolved",
+        "agent.thinking.delta",
         "agent.tool.result",
         "agent.message.delta",
         "agent.message.completed",
         "agent.done",
     ]
     resolved_event = resumed.events[1]["data"]
-    tool_result_event = resumed.events[2]["data"]
+    thinking_event = resumed.events[2]["data"]
+    tool_result_event = resumed.events[3]["data"]
     assert resolved_event["correlation_id"] == "interrupt-1"
+    assert "继续执行" in thinking_event["delta"]
     assert tool_result_event["effect"]["needs_refresh"] is True
     assert resumed.message == "已删除开场节点。"
 
@@ -309,10 +351,11 @@ async def test_chat_returns_agent_error_event_when_official_stream_fails() -> No
 
     assert [event["type"] for event in result.events] == [
         "agent.session.started",
+        "agent.thinking.delta",
         "agent.error",
         "agent.done",
     ]
-    assert "stream crashed" in result.events[1]["data"]["message"]
+    assert "stream crashed" in result.events[2]["data"]["message"]
     assert "stream crashed" in result.message
 
 
@@ -405,12 +448,13 @@ async def test_chat_stops_when_same_failed_tool_call_repeats() -> None:
 
     assert [event["type"] for event in result.events] == [
         "agent.session.started",
+        "agent.thinking.delta",
         "agent.tool.call",
         "agent.tool.result",
         "agent.error",
         "agent.done",
     ]
-    assert "重复失败" in result.events[3]["data"]["message"]
+    assert "重复失败" in result.events[4]["data"]["message"]
 
 
 @pytest.mark.asyncio

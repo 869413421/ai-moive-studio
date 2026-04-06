@@ -27,6 +27,7 @@ async def test_tool_calling_model_bind_tools_does_not_deepcopy_async_session() -
             user_id="user-1",
             document_id="doc-1",
             observation_summary={},
+            workflow_summary={},
             api_key_service=APIKeyService(session),
             provider_factory=ProviderFactory,
         )
@@ -76,6 +77,7 @@ async def test_tool_calling_model_serializes_uuid_observation_summary() -> None:
                 "items": [{"id": uuid.uuid4(), "title": "节点"}],
             }
         },
+        workflow_summary={},
         api_key_service=_FakeAPIKeyService(),
         provider_factory=_FakeProviderFactory,
     )
@@ -218,3 +220,41 @@ async def test_canvas_create_items_tool_batches_nodes_with_source_relations() ->
     assert result["ok"] is True
     assert result["effect"]["created_item_ids"] == ["shot-1", "shot-2"]
     assert result["effect"]["created_connection_ids"] == ["conn-1", "conn-2"]
+
+
+@pytest.mark.asyncio
+async def test_workflow_prepare_script_tool_uses_workflow_service_instead_of_canvas_create_item() -> None:
+    workflow_service = AsyncMock()
+    workflow_service.prepare_script.return_value = {
+        "ok": False,
+        "summary": "缺少必要信息：脚本类型。",
+        "effect": {"mutated": False, "summary": "缺少必要信息：脚本类型。"},
+        "missing_fields": ["script_type"],
+    }
+    execution_tools = AsyncMock()
+
+    factory = CanvasAssistantAgentFactory(
+        db_session=AsyncMock(),
+        inspection_tools=AsyncMock(),
+        canvas_execution_tools=execution_tools,
+        generation_tools=AsyncMock(),
+        workflow_service=workflow_service,
+    )
+    tools = factory._build_tools()
+    prepare_tool = next(tool for tool in tools if tool.name == "workflow_prepare_script")
+
+    result = await prepare_tool.ainvoke(
+        {
+            "idea": "机器人末世冒险",
+            "style_id": "cinematic",
+            "language": "中文",
+            "duration_target": "60s",
+            "shot_duration_seconds": 5,
+        },
+        config={"configurable": {"document_id": "doc-1", "user_id": "user-1", "api_key_id": "key-1", "chat_model_id": "model-1"}},
+    )
+
+    workflow_service.prepare_script.assert_awaited_once()
+    execution_tools.create_item.assert_not_called()
+    assert result["ok"] is False
+    assert result["effect"]["needs_refresh"] is False

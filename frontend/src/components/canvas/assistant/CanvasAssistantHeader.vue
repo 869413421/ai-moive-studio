@@ -1,5 +1,5 @@
 <template>
-  <header class="assistant-header" :class="{ 'assistant-header--streaming': streaming }">
+  <header class="assistant-header">
     <div class="assistant-header__copy">
       <div class="assistant-header__eyebrow">Canvas assistant</div>
       <h2 class="assistant-header__title">{{ title }}</h2>
@@ -60,7 +60,7 @@
   const subtitle = computed(() => {
     // 头部副文案不讲“产品废话”，只解释当前这一刻助手在做什么。
     if (props.streaming) {
-      return '正在通过 SSE 流式处理请求。'
+      return '正在编排当前链路，请在下方查看实时进展。'
     }
 
     if (props.status === 'awaiting_interrupt') {
@@ -81,10 +81,6 @@
     border: 1px solid rgba(34, 57, 98, 0.08);
     background: rgba(255, 255, 255, 0.9);
     box-shadow: 0 14px 32px rgba(34, 57, 98, 0.08);
-  }
-
-  .assistant-header--streaming {
-    animation: assistant-header-breathe 2.2s ease-in-out infinite;
   }
 
   .assistant-header__copy {
@@ -146,7 +142,6 @@
   .assistant-status--busy {
     color: #1855d6;
     background: #e7efff;
-    animation: assistant-status-breathe 1.8s ease-in-out infinite;
   }
 
   .assistant-status--warning {
@@ -179,25 +174,4 @@
     border: 1px solid rgba(75, 120, 255, 0.12);
   }
 
-  @keyframes assistant-header-breathe {
-    0%,
-    100% {
-      transform: translateY(0);
-      box-shadow: 0 14px 32px rgba(34, 57, 98, 0.08);
-    }
-    50% {
-      transform: translateY(-1px);
-      box-shadow: 0 18px 38px rgba(75, 120, 255, 0.16);
-    }
-  }
-
-  @keyframes assistant-status-breathe {
-    0%,
-    100% {
-      box-shadow: 0 0 0 0 rgba(75, 120, 255, 0.28);
-    }
-    50% {
-      box-shadow: 0 0 0 8px rgba(75, 120, 255, 0);
-    }
-  }
 </style>

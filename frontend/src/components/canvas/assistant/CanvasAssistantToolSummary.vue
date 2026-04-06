@@ -1,164 +1,201 @@
 <template>
-  <article class="assistant-tool">
-    <div class="assistant-tool__header">
+  <section class="assistant-activity" data-testid="assistant-tool-summary">
+    <div class="assistant-activity__header">
       <div>
-        <div class="assistant-tool__eyebrow">{{ eyebrowText }}</div>
-        <h3 class="assistant-tool__title">{{ titleText }}</h3>
+        <div class="assistant-activity__eyebrow">Workflow activity</div>
+        <h3 class="assistant-activity__title">{{ summaryText }}</h3>
       </div>
-      <span class="assistant-tool__status" :class="`assistant-tool__status--${activity.status || 'completed'}`">
-        {{ statusLabel }}
+      <span class="assistant-activity__badge" :class="{ 'assistant-activity__badge--live': live || runningToolCount > 0 }">
+        {{ live || runningToolCount > 0 ? `执行中 ${Math.max(1, runningToolCount)}` : '已同步' }}
       </span>
     </div>
 
-    <p v-if="summaryText" class="assistant-tool__summary">{{ summaryText }}</p>
-
-    <div class="assistant-tool__grid">
-      <details class="assistant-tool__details">
-        <summary>{{ detailTitle }}</summary>
-        <pre v-if="activity.args !== null && activity.args !== undefined">{{ formatJson(activity.args) }}</pre>
-        <pre v-if="activity.result !== null && activity.result !== undefined">{{ formatJson(activity.result) }}</pre>
-      </details>
+    <div v-if="thinkingBuffer" class="assistant-activity__thinking">
+      {{ thinkingBuffer }}
     </div>
-  </article>
+
+    <div v-if="toolCalls.length" class="assistant-activity__list">
+      <article
+        v-for="toolCall in toolCalls"
+        :key="toolCall.id"
+        class="assistant-tool-card"
+        :class="{ 'assistant-tool-card--running': toolCall.status !== 'completed' }"
+      >
+        <div class="assistant-tool-card__header">
+          <span class="assistant-tool-card__dot" :class="`assistant-tool-card__dot--${toolCall.status || 'completed'}`"></span>
+          <strong>{{ toolCall.toolName || 'unknown_tool' }}</strong>
+          <span class="assistant-tool-card__status">{{ readStatusLabel(toolCall.status) }}</span>
+        </div>
+        <div v-if="readToolSummary(toolCall)" class="assistant-tool-card__summary">{{ readToolSummary(toolCall) }}</div>
+      </article>
+    </div>
+  </section>
 </template>
 
 <script setup>
   import { computed } from 'vue'
 
   const props = defineProps({
-    activity: {
-      type: Object,
-      default: () => ({
-        activityType: 'tool',
-        title: '',
-        toolName: '',
-        status: 'completed',
-        args: null,
-        result: null
-      })
-    }
+    thinkingBuffer: { type: String, default: '' },
+    toolCalls: { type: Array, default: () => [] },
+    live: { type: Boolean, default: false }
   })
 
-  const statusLabelMap = {
-    running: '运行中',
-    pending: '排队中',
-    failed: '失败',
-    completed: '已完成'
+  const runningToolCount = computed(() =>
+    props.toolCalls.filter((toolCall) => String(toolCall?.status || '').trim() !== 'completed').length
+  )
+
+  const summaryText = computed(() => {
+    if (props.thinkingBuffer && props.toolCalls.length === 0) {
+      return '思考中'
+    }
+    if (props.toolCalls.length > 0) {
+      return `调用了 ${props.toolCalls.length} 个工具`
+    }
+    return '等待执行'
+  })
+
+  const readStatusLabel = (status) => {
+    const normalized = String(status || 'completed').trim()
+    if (normalized === 'requested' || normalized === 'running' || normalized === 'pending') return '执行中'
+    if (normalized === 'failed') return '失败'
+    return '已完成'
   }
 
-  const statusLabel = computed(
-    () => statusLabelMap[String(props.activity.status || 'completed').trim()] || '已完成'
-  )
-  const eyebrowText = computed(() =>
-    props.activity.activityType === 'step' ? 'Step' : 'Tool'
-  )
-  const titleText = computed(() =>
-    props.activity.activityType === 'step'
-      ? props.activity.title || 'agent_step'
-      : props.activity.toolName || 'unknown_tool'
-  )
-  const summaryText = computed(() =>
-    props.activity.activityType === 'step'
-      ? `${titleText.value} · ${statusLabel.value}`
-      : ''
-  )
-  const detailTitle = computed(() =>
-    props.activity.activityType === 'step' ? titleText.value : (props.activity.toolName || 'unknown_tool')
-  )
-
-  const formatJson = (value) => {
-    // 这里保留格式化 JSON，方便学习工具输入输出结构。
-    try {
-      return JSON.stringify(value, null, 2)
-    } catch {
-      return String(value || '')
-    }
+  const readToolSummary = (toolCall) => {
+    const result = toolCall?.result || {}
+    const effect = toolCall?.effect || result?.effect || {}
+    const displayMessage = result?.display?.message || result?.summary || effect?.summary
+    if (displayMessage) return String(displayMessage)
+    const args = toolCall?.args || {}
+    if (args?.query) return `query: ${args.query}`
+    if (args?.script_item_id) return `script_item_id: ${args.script_item_id}`
+    const itemIds = args?.item_ids || args?.video_item_ids || args?.keyframe_item_ids || args?.character_image_item_ids
+    if (Array.isArray(itemIds) && itemIds.length) return `节点数: ${itemIds.length}`
+    return ''
   }
 </script>
 
 <style scoped>
-  .assistant-tool {
-    padding: 14px 16px;
+  .assistant-activity {
+    padding: 12px 14px;
     border-radius: 18px;
     border: 1px solid rgba(34, 57, 98, 0.08);
     background: rgba(255, 255, 255, 0.96);
     box-shadow: 0 10px 24px rgba(34, 57, 98, 0.06);
   }
 
-  .assistant-tool__header {
+  .assistant-activity__header {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 12px;
   }
 
-  .assistant-tool__eyebrow {
+  .assistant-activity__eyebrow {
     color: #6a768f;
     font-size: 11px;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
-  .assistant-tool__title {
+  .assistant-activity__title {
     margin: 4px 0 0;
     color: #1f2a44;
     font-size: 15px;
     line-height: 1.35;
   }
 
-  .assistant-tool__status {
+  .assistant-activity__badge {
     padding: 6px 10px;
     border-radius: 999px;
     font-size: 12px;
     font-weight: 600;
+    background: #edf2f8;
+    color: #52607a;
   }
 
-  .assistant-tool__status--completed {
-    background: #e8f3eb;
-    color: #0f6a36;
+  .assistant-activity__badge--live {
+    background: #e7efff;
+    color: #1855d6;
+    animation: assistant-breathe 1.8s ease-in-out infinite;
   }
 
-  .assistant-tool__status--running,
-  .assistant-tool__status--pending {
-    background: #fff3d6;
-    color: #b06000;
-  }
-
-  .assistant-tool__status--failed {
-    background: #fce8e6;
-    color: #b42318;
-  }
-
-  .assistant-tool__summary {
-    margin: 10px 0 0;
+  .assistant-activity__thinking {
+    margin-top: 10px;
     color: #52607a;
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.65;
+    white-space: pre-wrap;
   }
 
-  .assistant-tool__grid {
+  .assistant-activity__list {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    margin-top: 10px;
+    margin-top: 12px;
   }
 
-  .assistant-tool__details {
-    color: #52607a;
+  .assistant-tool-card {
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(34, 57, 98, 0.04);
+    border: 1px solid rgba(34, 57, 98, 0.06);
+  }
+
+  .assistant-tool-card--running {
+    border-color: rgba(75, 120, 255, 0.18);
+    box-shadow: inset 0 0 0 1px rgba(75, 120, 255, 0.04);
+  }
+
+  .assistant-tool-card__header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #1f2a44;
+    font-size: 13px;
+  }
+
+  .assistant-tool-card__dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #0f6a36;
+  }
+
+  .assistant-tool-card__dot--requested,
+  .assistant-tool-card__dot--running,
+  .assistant-tool-card__dot--pending {
+    background: #4b78ff;
+    animation: assistant-breathe 1.4s ease-in-out infinite;
+  }
+
+  .assistant-tool-card__dot--failed {
+    background: #b42318;
+  }
+
+  .assistant-tool-card__status {
+    margin-left: auto;
+    color: #6a768f;
     font-size: 12px;
   }
 
-  .assistant-tool__details summary {
-    cursor: pointer;
-    color: #355ce0;
+  .assistant-tool-card__summary {
+    margin: 8px 0 0;
+    color: #5b6884;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
-  .assistant-tool__details pre {
-    margin: 8px 0 0;
-    padding: 12px;
-    overflow: auto;
-    border-radius: 14px;
-    background: rgba(34, 57, 98, 0.04);
-    white-space: pre-wrap;
+  @keyframes assistant-breathe {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 rgba(75, 120, 255, 0.22);
+    }
+    50% {
+      box-shadow: 0 0 0 8px rgba(75, 120, 255, 0);
+    }
   }
 </style>

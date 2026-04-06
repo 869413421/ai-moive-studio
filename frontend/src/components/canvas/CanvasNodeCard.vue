@@ -23,7 +23,7 @@
 
     <div class="node-body">
       <p v-if="item.item_type === 'text'" class="node-text">
-        {{ item.content.text || item.content.prompt || '输入 prompt 后生成文本内容' }}
+        {{ item.content.text || item.content.draft_text || item.content.text_preview || item.content.prompt || '输入 prompt 后生成文本内容' }}
       </p>
 
       <div v-else-if="item.item_type === 'image'" class="media-preview">

@@ -110,15 +110,18 @@ describe('CanvasAssistant', () => {
           message: { role: 'user', content: '请看一下', order: 1 }
         },
         {
-          id: 't-1',
-          type: 'activity',
-          activity: {
-            activityType: 'tool',
-            toolName: 'canvas.find_items',
-            status: 'completed',
-            args: { query: '开场' },
-            result: { items: [{ id: 'item-1' }] }
-          }
+          id: 'tool-summary',
+          type: 'tool_summary',
+          thinkingBuffer: '先定位开场节点，再决定是否删除。',
+          toolCalls: [
+            {
+              id: 't-1',
+              toolName: 'canvas.find_items',
+              status: 'completed',
+              args: { query: '开场' },
+              result: { items: [{ id: 'item-1' }] }
+            }
+          ]
         },
         {
           id: 'i-1',
@@ -148,6 +151,7 @@ describe('CanvasAssistant', () => {
     expect(wrapper.text()).toContain('AI 助手')
     expect(wrapper.text()).toContain('Session session-1')
     expect(wrapper.text()).toContain('请看一下')
+    expect(wrapper.text()).toContain('先定位开场节点，再决定是否删除。')
     expect(wrapper.text()).toContain('canvas.find_items')
     expect(wrapper.text()).toContain('确认执行')
     expect(wrapper.find('[data-testid="assistant-api-key-select"]').exists()).toBe(true)
@@ -170,7 +174,7 @@ describe('CanvasAssistant', () => {
     expect(reset).toHaveBeenCalled()
   })
 
-  it('adds streaming state classes so breathing animations can render while processing', () => {
+  it('renders streaming progress in timeline footer instead of animating header shell', () => {
     useCanvasAssistant.mockReturnValue({
       sessionId: ref('session-stream'),
       status: ref('streaming'),
@@ -204,7 +208,9 @@ describe('CanvasAssistant', () => {
       }
     })
 
-    expect(wrapper.classes()).toContain('canvas-assistant--streaming')
-    expect(wrapper.find('.assistant-header').classes()).toContain('assistant-header--streaming')
+    expect(wrapper.find('.assistant-timeline__loading').exists()).toBe(true)
+    expect(wrapper.find('.assistant-timeline__loading-ring').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="assistant-stream-indicator"]').exists()).toBe(true)
+    expect(wrapper.find('.assistant-header').classes()).not.toContain('assistant-header--streaming')
   })
 })

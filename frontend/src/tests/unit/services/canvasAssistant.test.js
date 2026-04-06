@@ -39,6 +39,7 @@ describe('canvas assistant service', () => {
     global.fetch.mockResolvedValueOnce(
       createStreamResponse([
         'data: {"type":"agent.session.started","data":{"session_id":"session-1"}}\n\n',
+        'data: {"type":"agent.thinking.delta","data":{"delta":"先检查现有剧本和角色节点。"}}\n\n',
         'data: {"type":"agent.tool.call","data":{"id":"tool-1","tool_name":"canvas.find_items","args":{"query":"开场"}}}\n\n',
         'data: {"type":"agent.message.completed","data":{"id":"assistant-1","role":"assistant","content":"我找到了候选节点。"}}\n\n',
         'data: {"type":"agent.interrupt.requested","data":{"session_id":"session-1","interrupt_id":"interrupt-1","kind":"confirm_delete","title":"确认删除","message":"请选择后继续","actions":["approve","reject"]}}\n\n',
@@ -65,21 +66,25 @@ describe('canvas assistant service', () => {
     })
     expect(events[0]).toMatchObject({ kind: 'session', sessionId: 'session-1' })
     expect(events[1]).toMatchObject({
+      kind: 'thinking',
+      thinking: { content: '先检查现有剧本和角色节点。' }
+    })
+    expect(events[2]).toMatchObject({
       kind: 'tool',
       toolCall: { id: 'tool-1', toolName: 'canvas.find_items' }
     })
-    expect(events[2]).toMatchObject({
+    expect(events[3]).toMatchObject({
       kind: 'message_completed',
       message: { id: 'assistant-1', role: 'assistant', content: '我找到了候选节点。' }
     })
-    expect(events[3]).toMatchObject({
+    expect(events[4]).toMatchObject({
       kind: 'interrupt',
       interrupt: {
         interruptId: 'interrupt-1',
         kind: 'confirm_delete'
       }
     })
-    expect(events[4]).toMatchObject({ kind: 'done' })
+    expect(events[5]).toMatchObject({ kind: 'done' })
   })
 
   it('preserves top-level effect from agent.tool.result events', async () => {

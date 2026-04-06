@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -64,7 +65,186 @@ def _normalize_message_tool_calls(message: Any) -> list[dict[str, Any]]:
         return [dict(tool_call) for tool_call in tool_calls]
     if isinstance(message, dict):
         return [dict(tool_call) for tool_call in list(message.get("tool_calls") or [])]
-    return []
+    return [] 
+
+
+WORKFLOW_STAGE_DEFINITIONS = [
+    ("script", ("剧本", "脚本")),
+    ("prep_nodes", ("预备节点", "准备节点", "分镜", "拆分镜头", "镜头")),
+    ("character_views", ("角色三视图", "三视图", "角色图", "角色设定")),
+    ("keyframes", ("关键帧", "镜头图", "关键画面")),
+    ("video", ("视频", "动画", "转场")),
+]
+
+WORKFLOW_STYLE_KEYWORDS = {
+    "cinematic": ("沙丘", "imax", "70mm", "胶片感", "长焦", "史诗感", "预告片"),
+    "anime-2d": ("日式动画", "二次元", "anime", "动画风"),
+    "cyberpunk": ("赛博朋克", "cyberpunk"),
+    "documentary": ("纪录片", "documentary"),
+    "noir": ("黑色电影", "noir"),
+}
+
+WORKFLOW_SCRIPT_TYPE_KEYWORDS = {
+    "trailer": ("预告片", "trailer"),
+    "short_film": ("短片", "short film", "short_film"),
+    "commercial": ("广告", "commercial"),
+    "animation": ("动画", "animation"),
+    "promotional": ("宣传片", "promotional"),
+}
+
+WORKFLOW_REQUIRED_FIELDS_BY_STAGE = {
+    "script": ("idea", "script_type", "style_id", "language", "duration_target", "shot_duration_seconds"),
+}
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", str(text or "")))
+
+
+def _extract_duration_target(text: str) -> str:
+    match = re.search(r"(?P<value>\d+)\s*(秒|s|分钟|min)", str(text or ""), re.IGNORECASE)
+    if not match:
+        return ""
+    value = match.group("value")
+    unit = match.group(2).lower()
+    return f"{value}min" if unit in {"分钟", "min"} else f"{value}s"
+
+
+def _extract_shot_duration_seconds(text: str) -> int:
+    patterns = [
+        r"(?:单镜头|每个镜头|镜头平均时长|平均时长)\D{0,8}(\d+)\s*(?:秒|s)",
+        r"(?:镜头)\D{0,8}(\d+)\s*(?:秒|s)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, str(text or ""), re.IGNORECASE)
+        if match:
+            return int(match.group(1))
+    return 0
+
+
+def _extract_workflow_draft(conversation: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    draft: dict[str, Any] = {
+        "idea": "",
+        "script_type": "",
+        "style_id": "",
+        "language": "",
+        "duration_target": "",
+        "shot_duration_seconds": 0,
+        "dialogue_mode": "",
+        "tone": "",
+        "constraints": [],
+        "creative_spec": {},
+    }
+    for message in list(conversation or []):
+        if str(message.get("role") or "").strip() != "user":
+            continue
+        content = str(message.get("content") or "").strip()
+        if not content:
+            continue
+        lowered = content.lower()
+        if not draft["idea"] and len(content) >= 12 and not any(token in content for token in ("你好", "怎么办", "帮我", "继续", "生成剧本")):
+            draft["idea"] = content
+        for script_type, keywords in WORKFLOW_SCRIPT_TYPE_KEYWORDS.items():
+            if not draft["script_type"] and any(keyword in lowered or keyword in content for keyword in keywords):
+                draft["script_type"] = script_type
+                break
+        for style_id, keywords in WORKFLOW_STYLE_KEYWORDS.items():
+            if not draft["style_id"] and any(keyword in lowered or keyword in content for keyword in keywords):
+                draft["style_id"] = style_id
+                break
+        if not draft["language"]:
+            if "英文" in content:
+                draft["language"] = "英文"
+            elif "日文" in content or "日语" in content:
+                draft["language"] = "日文"
+            elif _contains_cjk(content):
+                draft["language"] = "中文"
+        if not draft["duration_target"]:
+            draft["duration_target"] = _extract_duration_target(content) or draft["duration_target"]
+        if not draft["shot_duration_seconds"]:
+            draft["shot_duration_seconds"] = _extract_shot_duration_seconds(content) or draft["shot_duration_seconds"]
+    return draft
+
+
+def _infer_workflow_stages(goal: str, observation: dict[str, Any] | None = None) -> list[str]:
+    normalized = str(goal or "").strip()
+    if not normalized:
+        return []
+    detected = [stage for stage, keywords in WORKFLOW_STAGE_DEFINITIONS if any(keyword in normalized for keyword in keywords)]
+    if detected:
+        return detected
+    items = list(((observation or {}).get("canvas") or {}).get("items") or [])
+    item_titles = " ".join(str(item.get("title") or "") for item in items[:12])
+    item_types = " ".join(str(item.get("item_type") or "") for item in items[:12])
+    fallback = []
+    if "剧本" in item_titles or "script" in item_types.lower():
+        fallback.append("prep_nodes")
+    if "角色" in item_titles:
+        fallback.append("character_views")
+    if "image" in item_types.lower():
+        fallback.append("video")
+    return fallback
+
+
+def _build_workflow_context(
+    goal: str,
+    observation: dict[str, Any] | None = None,
+    *,
+    workflow_draft: dict[str, Any] | None = None,
+    resume: bool = False,
+) -> dict[str, Any]:
+    stages = _infer_workflow_stages(goal, observation)
+    if not stages:
+        stages = ["script"] if "生成" in str(goal or "") else []
+    normalized_draft = dict(workflow_draft or {})
+    missing_fields: list[str] = []
+    if stages:
+        for stage in stages:
+            required_fields = WORKFLOW_REQUIRED_FIELDS_BY_STAGE.get(stage) or ()
+            if required_fields:
+                missing_fields = [field for field in required_fields if not normalized_draft.get(field)]
+                break
+    summary_parts: list[str] = []
+    stage_labels = {
+        "script": "剧本",
+        "prep_nodes": "预备节点",
+        "character_views": "角色三视图",
+        "keyframes": "关键帧",
+        "video": "视频",
+    }
+    if stages:
+        summary_parts.append(" → ".join(stage_labels.get(stage, stage) for stage in stages))
+    if missing_fields:
+        summary_parts.append("待补参数：" + "、".join(missing_fields))
+    if resume:
+        summary_parts.append("继续执行已确认步骤")
+    return {
+        "target_stages": stages,
+        "summary": "；".join(summary_parts) if summary_parts else "",
+        "parameters": normalized_draft,
+        "missing_fields": missing_fields,
+        "resume": resume,
+    }
+
+
+def _build_thinking_delta(workflow: dict[str, Any], *, resume: bool = False) -> str:
+    stages = list(workflow.get("target_stages") or [])
+    missing_fields = list(workflow.get("missing_fields") or [])
+    if not stages:
+        return "已收到确认，继续执行当前步骤。" if resume else "先检查当前画布上下文，再决定下一步。"
+    stage_labels = {
+        "script": "剧本",
+        "prep_nodes": "预备节点",
+        "character_views": "角色三视图",
+        "keyframes": "关键帧",
+        "video": "视频",
+    }
+    chain = " → ".join(stage_labels.get(stage, stage) for stage in stages)
+    if missing_fields:
+        return f"先补齐必要参数：{'、'.join(missing_fields)}，再推进{chain}。"
+    if resume:
+        return f"已收到确认，继续执行：{chain}。"
+    return f"先规划工作流：{chain}。"
 
 
 def _normalize_tool_message(message: Any) -> tuple[str, str, Any]:
@@ -143,6 +323,7 @@ class CanvasAssistantService:
         session = await self.session_store.get_or_create(session_id, user_id, request.document_id)
         session.user_goal = request.message if not session.user_goal else session.user_goal
         session.conversation.append({"role": "user", "content": request.message})
+        workflow_draft = _extract_workflow_draft(session.conversation)
         graph = await self.agent_factory(
             document_id=request.document_id,
             user_id=user_id,
@@ -158,6 +339,8 @@ class CanvasAssistantService:
                 user_id,
                 request.api_key_id or "",
                 request.chat_model_id or "",
+                request.message,
+                workflow_draft=workflow_draft,
             ),
             config=self._build_config(
                 session_id=session.session_id,
@@ -197,6 +380,9 @@ class CanvasAssistantService:
                 user_id,
                 session.graph_state.get("api_key_id", ""),
                 session.graph_state.get("chat_model_id", ""),
+                session.user_goal or (session.conversation[-1]["content"] if session.conversation else ""),
+                workflow_draft=dict(session.graph_state.get("workflow_draft") or _extract_workflow_draft(session.conversation)),
+                resume=True,
             ),
             config=self._build_config(
                 session_id=session.session_id,
@@ -217,14 +403,19 @@ class CanvasAssistantService:
         user_id: str,
         api_key_id: str,
         chat_model_id: str,
+        user_goal: str = "",
+        workflow_draft: dict[str, Any] | None = None,
+        resume: bool = False,
     ) -> dict[str, Any]:
         snapshot = await self.inspection_tools.inspect_graph(document_id, user_id)
+        observation = _compact_observation_for_session({"canvas": snapshot})
         return {
             "document_id": document_id,
             "user_id": user_id,
             "api_key_id": api_key_id,
             "chat_model_id": chat_model_id,
-            "observation": _compact_observation_for_session({"canvas": snapshot}),
+            "observation": observation,
+            "workflow": _build_workflow_context(user_goal, observation, workflow_draft=workflow_draft, resume=resume),
         }
 
     def _build_config(
@@ -265,6 +456,7 @@ class CanvasAssistantService:
         final_message = ""
         pending_interrupt: AgentInterrupt | None = None
         tool_history: list[dict[str, Any]] = []
+        last_failed_message = ""
         call_signatures: dict[str, str] = {}
         failed_signatures: set[str] = set()
 
@@ -285,12 +477,16 @@ class CanvasAssistantService:
             events.append({"type": event_type, "data": data})
 
         emit("agent.session.started", {"session_id": session_id})
+        workflow = dict(context.get("workflow") or {}) if isinstance(context, dict) else {}
+        thinking_delta = _build_thinking_delta(workflow, resume=bool(resume_decision))
         if resume_decision:
             emit(
                 "agent.interrupt.resolved",
                 {"interrupt_id": resume_interrupt_id, "decision": resume_decision},
                 correlation_id=resume_interrupt_id,
             )
+        if thinking_delta:
+            emit("agent.thinking.delta", {"delta": thinking_delta})
 
         try:
             async for chunk in graph.astream(payload, config=config, context=context, stream_mode="updates"):
@@ -349,6 +545,7 @@ class CanvasAssistantService:
                                             "api_key_id": str(config.get("configurable", {}).get("api_key_id") or ""),
                                             "chat_model_id": str(config.get("configurable", {}).get("chat_model_id") or ""),
                                             "run_id": run_id,
+                                            "workflow_draft": dict((context or {}).get("workflow", {}).get("parameters") or {}),
                                         },
                                     }
                                 call_signatures[str(tool_call.get("id") or "")] = signature
@@ -386,6 +583,8 @@ class CanvasAssistantService:
                             signature = call_signatures.get(correlation_id, "")
                             if signature:
                                 failed_signatures.add(signature)
+                            if isinstance(normalized_result, dict) and str(normalized_result.get("message") or "").strip():
+                                last_failed_message = str(normalized_result.get("message") or "").strip()
                         tool_history.append(
                             {
                                 "correlation_id": correlation_id,
@@ -409,6 +608,11 @@ class CanvasAssistantService:
             final_message = str(exc).strip() or "assistant stream failed"
             emit("agent.error", {"message": final_message})
 
+        if not final_message and last_failed_message:
+            final_message = last_failed_message
+            fallback_message_id = f"assistant-{uuid4()}"
+            emit("agent.message.delta", {"id": fallback_message_id, "role": "assistant", "delta": final_message})
+            emit("agent.message.completed", {"id": fallback_message_id, "role": "assistant", "content": final_message})
         emit("agent.done", {"session_id": session_id})
         return {
             "events": events,
@@ -419,6 +623,7 @@ class CanvasAssistantService:
                 "api_key_id": str(config.get("configurable", {}).get("api_key_id") or ""),
                 "chat_model_id": str(config.get("configurable", {}).get("chat_model_id") or ""),
                 "run_id": run_id,
+                "workflow_draft": dict((context or {}).get("workflow", {}).get("parameters") or {}),
             },
         }
 

@@ -6,10 +6,11 @@ import { describe, expect, it } from 'vitest'
 import { buildCanvasAssistantTimelineItems, reduceCanvasAssistantEventLog } from '@/composables/useCanvasAssistantTimeline'
 
 describe('useCanvasAssistantTimeline', () => {
-  it('builds timeline directly from eventLog reducer source', () => {
+  it('builds old-style timeline items from eventLog reducer source', () => {
     const items = buildCanvasAssistantTimelineItems({
       eventLog: [
         { kind: 'message', message: { id: 'm-1', role: 'user', content: '删除开场节点', order: 1 } },
+        { kind: 'thinking', thinking: { content: '先定位开场节点。', order: 2 } },
         {
           kind: 'tool',
           toolCall: {
@@ -38,23 +39,22 @@ describe('useCanvasAssistantTimeline', () => {
 
     expect(items.map((item) => item.type)).toEqual([
       'user_message',
-      'activity',
-      'interrupt_card',
+      'tool_summary',
       'assistant_message',
+      'interrupt_card',
       'error_notice'
     ])
     expect(items[1]).toMatchObject({
-      activity: {
-        activityType: 'tool',
-        toolName: 'canvas.find_items'
-      }
+      thinkingBuffer: '先定位开场节点。',
+      toolCalls: [{ toolName: 'canvas.find_items' }]
     })
   })
 
-  it('reduces finalized message, tool activity, interrupt and refresh request from eventLog', () => {
+  it('reduces finalized message, tool summary, interrupt and refresh request from eventLog', () => {
     const items = buildCanvasAssistantTimelineItems({
       eventLog: [
         { kind: 'message', message: { id: 'm-1', role: 'user', content: '更新一下', order: 1 } },
+        { kind: 'thinking', thinking: { content: '准备批量更新节点。', order: 2 } },
         {
           kind: 'tool',
           toolCall: {
@@ -83,12 +83,13 @@ describe('useCanvasAssistantTimeline', () => {
 
     expect(items.map((item) => item.type)).toEqual([
       'user_message',
-      'activity',
+      'tool_summary',
       'assistant_message',
     ])
     expect(items[1]).toMatchObject({
-      type: 'activity',
-      activity: { id: 'tool-1', activityType: 'tool', toolName: 'canvas.update_items' }
+      type: 'tool_summary',
+      thinkingBuffer: '准备批量更新节点。',
+      toolCalls: [{ id: 'tool-1', toolName: 'canvas.update_items' }]
     })
   })
 
@@ -118,6 +119,7 @@ describe('useCanvasAssistantTimeline', () => {
     const reduced = reduceCanvasAssistantEventLog({
       eventLog: [
         { kind: 'session', sessionId: 'session-1' },
+        { kind: 'thinking', thinking: { content: '先检查剧本，再决定是否拆分分镜。' } },
         {
           kind: 'tool',
           toolCall: {
@@ -133,5 +135,6 @@ describe('useCanvasAssistantTimeline', () => {
     expect(reduced.status).toBe('streaming')
     expect(reduced.isStreaming).toBe(true)
     expect(reduced.activeTool).toBe('canvas.find_items')
+    expect(reduced.thinkingBuffer).toBe('先检查剧本，再决定是否拆分分镜。')
   })
 })

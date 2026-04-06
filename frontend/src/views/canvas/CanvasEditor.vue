@@ -379,7 +379,11 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
     if (!selectedItem.value) return {}
     return {
       title: selectedItem.value.title || '',
-      text: selectedItem.value.content?.text || '',
+      text:
+        selectedItem.value.content?.text ||
+        selectedItem.value.content?.draft_text ||
+        selectedItem.value.content?.text_preview ||
+        '',
       apiKeyId: selectedItem.value.generation_config?.api_key_id || '',
       model: selectedItem.value.generation_config?.model || '',
       ...normalizePromptTokens(resolveInitialPromptTokens(selectedItem.value))
