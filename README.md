@@ -1,3 +1,18 @@
+<div align="center">
+
+## 🤝 赞助支持 · 秘塔科技
+
+[![MetaSota 秘塔科技](docs/media/metasota-logo.png)](https://metaso.cn/minimax-h3/?s=AICON)
+
+**MiniMax H3 视频生成 API｜秘塔科技**
+
+秘塔科技提供高性价比的 MiniMax H3 视频生成服务：**768P 仅 0.09 元/秒，2K 仅 0.15 元/秒**。支持原生 2K、音画同步，API 兼容 **OpenAI 协议**，同时支持 **ComfyUI**，无需自行部署 GPU。
+
+🎁 通过 [AICON 专属链接注册](https://metaso.cn/minimax-h3/?s=AICON)，即可领取赠送额度及专属优惠。
+
+</div>
+
+---
 # AICON
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -13,8 +28,6 @@ AICON 是一套面向 AI 内容创作的全栈工作台，覆盖从文本理解�
 在线站点：[https://aicon-studio.com/](https://aicon-studio.com/)
 
 技术栈：`FastAPI`、`Vue 3`、`PostgreSQL`、`Redis`、`Celery`、`MinIO`
-
-> 说明：本人目前在广州地区求职中，具备丰富的 AI 应用开发经验，包括 Agent、RAG 等方向，欢迎相关技术岗位与合作机会交流。
 
 ## 目录
 
