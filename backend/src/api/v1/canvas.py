@@ -179,25 +179,20 @@ async def get_canvas_model_catalog(
         size=100,
     )
 
-    catalog = {
-        "text": [],
-        "image": [],
-        "video": [],
-    }
+    import asyncio
+    from src.services.provider.catalog import get_catalog
 
-    for model_type in catalog.keys():
-        seen = set()
-        for api_key in api_keys:
-            try:
-                models = await api_key_service.get_models(str(api_key.id), current_user.id, model_type)
-            except Exception:
-                continue
-            for model in models or []:
-                if model and model not in seen:
-                    seen.add(model)
-                    catalog[model_type].append(model)
+    async def fetch(key):
+        try:
+            # Keys were already loaded with owner and active-status filters.
+            # Only network IO is parallel; AsyncSession must not run concurrent queries.
+            data = await get_catalog(key.provider, key.base_url, key.get_api_key())
+            return str(key.id), data
+        except ValueError as exc:
+            return str(key.id), {'models': [], 'error': str(exc), 'defaults': {}}
 
-    return catalog
+    connections = dict(await asyncio.gather(*(fetch(key) for key in api_keys)))
+    return {'connections': connections}
 
 
 @router.get("/canvas-documents", response_model=CanvasDocumentListResponse)

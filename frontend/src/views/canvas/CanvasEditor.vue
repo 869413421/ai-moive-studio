@@ -173,13 +173,13 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
   import {
     DEFAULT_ASPECT_RATIO,
     buildCanvasGenerationPayload,
-    getSupportedVideoAspectRatios,
-    IMAGE_ASPECT_RATIO_OPTIONS,
     normalizeVideoAspectRatio
   } from '@/utils/canvasGenerationPayload'
   import { buildCanvasHistoryEntries } from '@/utils/canvasGenerationHistory'
   import { resolveCanvasRunStatusMeta } from '@/utils/canvasStageMedia'
   import { buildPromptDerivatives } from '@/utils/promptMentionTokens'
+
+  import { modelsFor, defaultSelection, modelFor } from '@/utils/modelCatalog'
 
   const route = useRoute()
   const router = useRouter()
@@ -192,11 +192,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
   const styleReferencePreviewMap = ref({})
   const imageUploadPreviewMap = ref({})
   const apiKeyOptions = ref([])
-  const modelCatalog = ref({
-    text: [],
-    image: [],
-    video: []
-  })
+  const modelCatalog = ref({ connections: {} })
   const historyDrawerVisible = ref(false)
   const historyTargetItemId = ref('')
   const historyTargetMediaType = ref('image')
@@ -419,7 +415,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
         (styleReferenceObjectKey ? '已选择风格参考' : ''),
       styleReferencePreviewUrl: styleReferencePreview.url || '',
       aspectRatio: String(
-        selectedItem.value.content?.aspectRatio || DEFAULT_ASPECT_RATIO || ''
+        selectedItem.value.content?.aspectRatio || selectedModel.value?.aspect_ratios?.[0] || DEFAULT_ASPECT_RATIO || ''
       ).trim(),
       apiKeyId: selectedItem.value.generation_config?.api_key_id || '',
       model: selectedItem.value.generation_config?.model || '',
@@ -433,7 +429,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
       title: selectedItem.value.title || '',
       resultVideoUrl: selectedItem.value.content?.result_video_url || '',
       aspectRatio: normalizeVideoAspectRatio(
-        selectedItem.value.generation_config?.model || '',
+        selectedModel.value,
         selectedItem.value.generation_config?.aspectRatio || ''
       ),
       apiKeyId: selectedItem.value.generation_config?.api_key_id || '',
@@ -449,41 +445,15 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
     return resolveCanvasRunStatusMeta(selectedItem.value)
   })
 
-  const textModelOptions = computed(() => modelCatalog.value.text || [])
-  const imageModelOptions = computed(() => modelCatalog.value.image || [])
-  const videoModelOptions = computed(() => modelCatalog.value.video || [])
-  const defaultCanvasApiKeyId = computed(
-    () => String(apiKeyOptions.value[0]?.value || '').trim()
-  )
-  const defaultImageModel = computed(
-    () => String(imageModelOptions.value[0] || '').trim()
-  )
-  const defaultVideoModel = computed(
-    () => String(videoModelOptions.value[0] || '').trim()
-  )
-  const imageAspectRatioOptions = IMAGE_ASPECT_RATIO_OPTIONS
-  const videoAspectRatioOptions = computed(() =>
-    getSupportedVideoAspectRatios(
-      selectedItem.value?.generation_config?.model || ''
-    )
-  )
+  const selectedModels = (type) => modelsFor(modelCatalog.value, selectedItem.value?.generation_config?.api_key_id, type).map(m => m.id)
+  const textModelOptions = computed(() => selectedModels('text'))
+  const imageModelOptions = computed(() => selectedModels('image'))
+  const videoModelOptions = computed(() => selectedModels('video'))
+  const selectedModel = computed(() => modelFor(modelCatalog.value, selectedItem.value))
+  const imageAspectRatioOptions = computed(() => selectedModel.value?.aspect_ratios || [])
+  const videoAspectRatioOptions = computed(() => selectedModel.value?.aspect_ratios || [])
 
-  const buildDefaultGenerationConfig = (type) => {
-    if (type !== 'image' && type !== 'video') {
-      return {}
-    }
-    const apiKeyId = defaultCanvasApiKeyId.value
-    const model =
-      type === 'image' ? defaultImageModel.value : defaultVideoModel.value
-    const config = {}
-    if (apiKeyId) {
-      config.api_key_id = apiKeyId
-    }
-    if (model) {
-      config.model = model
-    }
-    return config
-  }
+  const buildDefaultGenerationConfig = (type) => defaultSelection(modelCatalog.value, apiKeyOptions.value, type)
   const historyTargetItem = computed(
     () =>
       items.value.find((item) => item.id === historyTargetItemId.value) || null
@@ -592,21 +562,13 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
         label: `${key.name} (${key.provider})`
       }))
 
-      modelCatalog.value = {
-        text: Array.isArray(modelCatalogResponse?.text)
-          ? modelCatalogResponse.text
-          : [],
-        image: Array.isArray(modelCatalogResponse?.image)
-          ? modelCatalogResponse.image
-          : [],
-        video: Array.isArray(modelCatalogResponse?.video)
-          ? modelCatalogResponse.video
-          : []
-      }
+      modelCatalog.value = modelCatalogResponse || { connections: {} }
+      const issues = Object.values(modelCatalog.value.connections || {}).filter(c => c.error)
+      if (issues.length) ElMessage.warning('部分密钥的模型目录不可用，请检查密钥设置')
     } catch (error) {
       console.error('Load canvas config catalog failed', error)
       apiKeyOptions.value = []
-      modelCatalog.value = { text: [], image: [], video: [] }
+      modelCatalog.value = { connections: {} }
       ElMessage.warning('加载画布模型目录失败')
     } finally {
       catalogLoading.value = false
@@ -736,7 +698,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
     const textCount = availableReferenceItems.value.filter(
       (item) => item.item_type === 'text'
     ).length
-    return `上游可引用 ${imageCount} 个图片节点，${textCount} 个文本节点。视频生成会自动带上上游图片 URL。`
+    return `上游可引用 ${imageCount} 个图片节点，${textCount} 个文本节点。当前模型最多使用 ${selectedModel.value?.max_references || 0} 张参考图。`
   })
 
   const zoomHintText = computed(
@@ -945,12 +907,20 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
 
   const patchGenerationConfig = (patch) => {
     if (!selectedItem.value) return
-    updateItem(selectedItem.value.id, {
-      generation_config: {
-        ...selectedItem.value.generation_config,
-        ...patch
-      }
-    })
+    const config = { ...selectedItem.value.generation_config, ...patch }
+    const choices = modelsFor(modelCatalog.value, config.api_key_id, selectedItem.value.item_type)
+    if ('api_key_id' in patch && !choices.some(m => m.id === config.model)) {
+      config.model = choices[0]?.id || ''
+    }
+    const model = choices.find(m => m.id === config.model)
+    if (selectedItem.value.item_type === 'video' && !model?.aspect_ratios?.includes(config.aspectRatio)) {
+      config.aspectRatio = model?.aspect_ratios?.[0] || ''
+    }
+    const update = { generation_config: config }
+    if (selectedItem.value.item_type === 'image' && !model?.aspect_ratios?.includes(selectedItem.value.content?.aspectRatio)) {
+      update.content = { ...selectedItem.value.content, aspectRatio: model?.aspect_ratios?.[0] || '' }
+    }
+    updateItem(selectedItem.value.id, update)
   }
 
   const updatePromptTokens = (tokens) => {
@@ -1259,6 +1229,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
 
     return buildCanvasGenerationPayload({
       item,
+      modelCapabilities: modelFor(modelCatalog.value, item),
       resolvedMentions,
       resolveImageReferenceObjectKey,
       resolveStyleReferenceImageObjectKey
@@ -1271,6 +1242,7 @@ import CanvasTextStudio from '@/components/canvas/CanvasTextStudio.vue'
     const targetItemId = String(targetItem.id || '').trim()
     try {
       syncSelectedStudioDraft()
+      if (!modelFor(modelCatalog.value, targetItem)) throw new Error('请重新选择当前密钥可用的模型')
       if (dirty.value) {
         await save()
       }

@@ -91,12 +91,20 @@ async def create_api_key(
         
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except Exception as e:
         logger.error(f"创建API密钥失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建API密钥失败: {str(e)}"
         )
+
+
+@router.get("/provider-presets")
+async def get_provider_presets(current_user: User = Depends(get_current_user_required)):
+    from src.services.provider.registry import PROVIDERS
+    return [{'id': key, 'name': value[0], 'base_url': value[1]} for key, value in PROVIDERS.items()]
 
 
 @router.get("/{key_id}", response_model=APIKeyResponse)
@@ -143,6 +151,8 @@ async def update_api_key(
         
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except Exception as e:
         logger.error(f"更新API密钥失败: {e}")
         raise HTTPException(
@@ -175,6 +185,8 @@ async def delete_api_key(
         
     except HTTPException:
         raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except Exception as e:
         logger.error(f"删除API密钥失败: {e}")
         raise HTTPException(
@@ -223,8 +235,20 @@ async def get_api_key_models(
     # 验证key存在且属于当前用户
     await api_key_service.get_api_key_by_id(key_id, current_user.id)
     
-    models = await api_key_service.get_models(key_id, current_user.id, type)
-    return models
+    try:
+        return await api_key_service.get_models(key_id, current_user.id, type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+@router.get("/{key_id}/model-catalog")
+async def get_model_catalog(key_id: str, refresh: bool = False, include_hidden: bool = False,
+                            current_user: User = Depends(get_current_user_required),
+                            db: AsyncSession = Depends(get_db)):
+    try:
+        return await APIKeyService(db).get_model_catalog(key_id, current_user.id, refresh, include_hidden)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 __all__ = ["router"]

@@ -4,27 +4,16 @@ export const IMAGE_ASPECT_RATIO_OPTIONS = ['1:1', '3:4', '4:3', '16:9', '9:16']
 export const VIDEO_ASPECT_RATIO_OPTIONS = ['16:9', '9:16', '1:1']
 export const DEFAULT_ASPECT_RATIO = '16:9'
 
-export const getSupportedVideoAspectRatios = (modelName = '') => {
-  const normalizedModelName = String(modelName || '')
-    .trim()
-    .toLowerCase()
+export const getSupportedVideoAspectRatios = (capabilities) => capabilities?.aspect_ratios || []
 
-  if (normalizedModelName.startsWith('veo')) {
-    return ['16:9', '9:16']
-  }
-
-  return VIDEO_ASPECT_RATIO_OPTIONS
-}
-
-export const normalizeVideoAspectRatio = (modelName = '', aspectRatio = '') => {
-  const supportedRatios = getSupportedVideoAspectRatios(modelName)
-  return supportedRatios.includes(aspectRatio)
-    ? aspectRatio
-    : supportedRatios[0]
+export const normalizeVideoAspectRatio = (capabilities, aspectRatio = '') => {
+  const ratios = getSupportedVideoAspectRatios(capabilities)
+  return ratios.includes(aspectRatio) ? aspectRatio : (ratios[0] || aspectRatio || DEFAULT_ASPECT_RATIO)
 }
 
 export const buildCanvasGenerationPayload = ({
   item,
+  modelCapabilities,
   resolvedMentions = [],
   resolveImageReferenceObjectKey = (value) =>
     String(value?.object_key || value?.objectKey || '').trim(),
@@ -65,7 +54,7 @@ export const buildCanvasGenerationPayload = ({
     }
 
     const aspectRatio = normalizeVideoAspectRatio(
-      item?.generation_config?.model,
+      modelCapabilities,
       item?.generation_config?.aspectRatio
     )
     if (aspectRatio) {
@@ -83,7 +72,7 @@ export const buildCanvasGenerationPayload = ({
       .filter(Boolean)
     const styleReferenceImageObjectKey =
       resolveStyleReferenceImageObjectKey(content)
-    const aspectRatio = String(content.aspectRatio || '').trim()
+    const aspectRatio = String(content.aspectRatio || modelCapabilities?.aspect_ratios?.[0] || '').trim()
 
     if (upstreamImageObjectKeys.length) {
       payload.options.reference_image_object_keys = upstreamImageObjectKeys

@@ -70,11 +70,7 @@ async def _generate_scene_image_worker(
                 
                 # 调用图片生成
                 from src.services.provider.factory import ProviderFactory
-                provider = ProviderFactory.create(
-                    provider=api_key.provider,
-                    api_key=api_key.get_api_key(),
-                    base_url=api_key.base_url
-                )
+                provider = ProviderFactory.from_key(api_key)
                 
                 from src.services.image import retry_with_backoff
                 result = await retry_with_backoff(

@@ -104,11 +104,7 @@ async def _generate_keyframe_worker(
                         logger.info(f'[批量生成] 添加角色 {char.name} 的参考图: {char.avatar_url}')
             
             # 2. Provider 调用
-            img_provider = ProviderFactory.create(
-                provider=api_key.provider,
-                api_key=api_key.get_api_key(),
-                base_url=api_key.base_url
-            )
+            img_provider = ProviderFactory.from_key(api_key)
 
             logger.info(f"生成分镜 {shot.id} 关键帧, 参考图数量={len(reference_images)}, Prompt: {final_prompt[:100]}...")
             
@@ -182,11 +178,7 @@ class VisualIdentityService(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, owner_id)
         
-        img_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        img_provider = ProviderFactory.from_key(api_key)
 
         base_prompt = f"Character design sheet, {character.name}, {character.visual_traits}, frontal view, profile view, and back view, high quality digital art, consistent features, neutral background."
         final_prompt = prompt_override or base_prompt
@@ -195,30 +187,12 @@ class VisualIdentityService(BaseService):
             response = await retry_with_backoff(
                 lambda: img_provider.generate_image(
                     prompt=final_prompt,
-                    model="flux-pro"
+                    model=None
                 )
             )
             
-            image_url = response.data[0].url
-            
-            async with aiohttp.ClientSession() as http_session:
-                async with http_session.get(image_url) as resp:
-                    if resp.status != 200: raise Exception(f"下载失败: {resp.status}")
-                    content = await resp.read()
-
-            storage_client = await get_storage_client()
-            file_id = str(uuid.uuid4())
-            upload_file = UploadFile(
-                filename=f"{file_id}.jpg",
-                file=io.BytesIO(content),
-            )
-            
-            storage_result = await storage_client.upload_file(
-                user_id=owner_id,
-                file=upload_file,
-                metadata={"character_id": str(character.id), "type": "reference"}
-            )
-            object_key = storage_result["object_key"]
+            from src.utils.image_utils import extract_and_upload_image
+            object_key = await extract_and_upload_image(response, owner_id, {"character_id": str(character.id), "type": "reference"})
 
             character.reference_images = [object_key]
             await self.db_session.commit()
@@ -482,11 +456,7 @@ class VisualIdentityService(BaseService):
             raise ValueError(f"API Key 不存在: {api_key_id}")
         
         # 4. 创建提供商
-        provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        provider = ProviderFactory.from_key(api_key)
         
         # 5. 生成图像提示词
         # 单个生成时：前端应该先调用构建器生成专业提示词，用户调整后传递过来

@@ -77,6 +77,13 @@ async def extract_and_upload_image(
     """
     # 1. 提取图片数据
     image_bytes, mime_type = await _extract_image_bytes(result)
+    from PIL import Image
+    try:
+        with Image.open(io.BytesIO(image_bytes)) as image:
+            mime_type = Image.MIME[image.format]
+            image.verify()
+    except Exception:
+        raise ValueError('图片响应不是有效图像') from None
     
     # 2. 上传到存储
     storage_client = await get_storage_client()

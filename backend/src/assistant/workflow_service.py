@@ -654,6 +654,8 @@ class CanvasAssistantWorkflowService:
 
     async def _build_provider(self, api_key_id: str, user_id: str) -> Any:
         api_key = await self.api_key_service.get_api_key_by_id(api_key_id, user_id)
+        if api_key.status != 'active':
+            raise ValueError('此 API 密钥未启用')
         return self.provider_factory.create(provider=api_key.provider, api_key=api_key.get_api_key(), base_url=api_key.base_url)
 
     def _normalize_script_input(self, input_data: dict[str, Any]) -> dict[str, Any]:

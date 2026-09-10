@@ -7,6 +7,7 @@ from src.assistant.workflow_service import CanvasAssistantWorkflowService
 
 
 class _FakeAPIKey:
+    status = "active"
     provider = "custom"
     base_url = "https://example.com"
 

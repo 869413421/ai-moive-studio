@@ -22,7 +22,7 @@
       >
         <el-option label="全部提供商" value="" />
         <el-option
-          v-for="provider in apiKeyUtils.getProviderOptions()"
+          v-for="provider in providerOptions"
           :key="provider.value"
           :label="provider.label"
           :value="provider.value"
@@ -129,12 +129,13 @@
         <el-form-item label="服务提供商" prop="provider">
           <el-select
             v-model="formData.provider"
+            @change="applyProviderPreset"
             placeholder="请选择服务提供商"
             :disabled="isEdit"
             style="width: 100%"
           >
             <el-option
-              v-for="provider in apiKeyUtils.getProviderOptions()"
+              v-for="provider in providerOptions"
               :key="provider.value"
               :label="provider.label"
               :value="provider.value"
@@ -153,7 +154,7 @@
         <el-form-item label="Base URL" prop="base_url">
           <el-input
             v-model="formData.base_url"
-            placeholder="默认: https://api.aiconapi.me/v1，可按需改成你自己的兼容地址"
+            placeholder="留空使用所选供应商的默认地址"
           />
         </el-form-item>
         <el-form-item label="状态" prop="status" v-if="isEdit">
@@ -179,7 +180,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Key } from '@element-plus/icons-vue'
 import { apiKeysService, apiKeyUtils } from '@/services/apiKeys'
 
-const DEFAULT_CUSTOM_BASE_URL = 'https://api.aiconapi.me/v1'
+const providerOptions = ref([])
+const applyProviderPreset = (provider) => {
+  formData.base_url = providerOptions.value.find(p => p.value === provider)?.base_url || ''
+}
 
 // 状态
 const loading = ref(false)
@@ -200,7 +204,7 @@ const formData = reactive({
   name: '',
   provider: '',
   api_key: '',
-  base_url: DEFAULT_CUSTOM_BASE_URL,
+  base_url: '',
   status: 'active'
 })
 
@@ -254,7 +258,7 @@ const showAddDialog = () => {
     name: '',
     provider: '',
     api_key: '',
-    base_url: DEFAULT_CUSTOM_BASE_URL,
+    base_url: '',
     status: 'active'
   })
   dialogVisible.value = true
@@ -299,7 +303,7 @@ const handleSubmit = async () => {
       // 更新API密钥
       const updateData = {
         name: formData.name.trim(),
-        base_url: formData.base_url.trim() || null,
+        base_url: formData.base_url.trim(),
         status: formData.status
       }
       await apiKeysService.updateAPIKey(formData.id, updateData)
@@ -350,8 +354,14 @@ const handleDelete = async (row) => {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
   loadAPIKeys()
+  try {
+    const presets = await apiKeysService.getProviderPresets()
+    providerOptions.value = presets.map(p => ({ value: p.id, label: p.name, base_url: p.base_url }))
+  } catch {
+    ElMessage.warning('加载供应商选项失败，请刷新页面')
+  }
 })
 </script>
 

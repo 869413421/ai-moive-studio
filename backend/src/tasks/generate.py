@@ -66,7 +66,7 @@ async def generate_images(db_session: AsyncSession, self, api_key_id: str, sente
     name="generate.generate_audio"
 )
 @async_task_decorator
-async def generate_audio(db_session: AsyncSession, self, api_key_id: str, sentences_ids: list[str], voice: str = "alloy", model: str = "tts-1"):
+async def generate_audio(db_session: AsyncSession, self, api_key_id: str, sentences_ids: list[str], voice: str = None, model: str = None):
     """批量生成音频的 Celery 任务"""
     from src.services.audio import AudioService
     logger.info(f"Celery任务开始: generate_audio (sentences_ids={sentences_ids})")

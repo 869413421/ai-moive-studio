@@ -42,6 +42,9 @@ class APIKeyService(BaseService):
             创建的API密钥对象
         """
 
+        from src.services.provider.registry import connection
+        base_url = connection(provider, base_url)["base_url"]
+
         # 创建API密钥对象
         new_key = APIKey(
             user_id=_normalize_uuid(user_id),
@@ -174,7 +177,8 @@ class APIKeyService(BaseService):
             api_key.name = name
 
         if base_url is not None:
-            api_key.base_url = base_url
+            from src.services.provider.registry import connection
+            api_key.base_url = connection(api_key.provider, base_url)["base_url"]
 
         if key_status is not None:
             api_key.status = key_status.lower()
@@ -255,122 +259,19 @@ class APIKeyService(BaseService):
         return api_keys
 
 
-    async def get_models(self, key_id: str, user_id: str, model_type: str = "text") -> List[str]:
-        """
-        获取API密钥可用的模型列表
-        
-        Args:
-            key_id: API密钥ID
-            user_id: 用户ID
-            model_type: 模型类型 (text/image/video/audio)
-            
-        Returns:
-            List[str]: 模型列表
-        """
-        # 验证key存在且属于当前用户
+    async def get_model_catalog(self, key_id, user_id, refresh=False, include_hidden=False):
+        from src.services.provider.catalog import get_catalog
         api_key = await self.get_api_key_by_id(key_id, user_id)
-        
-        provider = api_key.provider.lower()
-        
-        # SiliconFlow provider - 从API获取模型列表
-        if provider == 'siliconflow':
-            import httpx
-            try:
-                # 获取解密后的key
-                decrypted_key = api_key.get_api_key()
-                
-                async with httpx.AsyncClient() as client:
-                    # SiliconFlow API docs suggest query param 'type' or 'sub_type' for filtering
-                    # But to be safe, we fetch all and filter manually
-                    response = await client.get(
-                        "https://api.siliconflow.cn/v1/models",
-                        headers={"Authorization": f"Bearer {decrypted_key}"},
-                        timeout=10.0
-                    )
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        models = data.get("data", [])
-                        
-                        # 额外进行一次客户端代码过滤，确保类型一致
-                        filtered_models = []
-                        for m in models:
-                            m_id = m.get("id", "")
-                            # SiliconFlow models have 'type' or 'sub_type' field
-                            m_type = (m.get("type") or m.get("sub_type") or "").lower()
-                            
-                            if model_type == "text":
-                                if m_type in ["chat", "text", "llm"]:
-                                    filtered_models.append(m_id)
-                            elif model_type == "image":
-                                if m_type in ["image", "text-to-image"]:
-                                    filtered_models.append(m_id)
-                            elif model_type == "video":
-                                if m_type in ["video", "text-to-video"]:
-                                    filtered_models.append(m_id)
-                            elif model_type == "audio":
-                                if m_type in ["audio", "text-to-speech", "tts"]:
-                                    filtered_models.append(m_id)
-                            else:
-                                filtered_models.append(m_id)
-                        
-                        # 如果没有通过类型过滤出结果，且 model_type 为 image/video，
-                        # 尝试通过 ID 关键字匹配作为兜底
-                        if not filtered_models and models:
-                            if model_type == "image":
-                                filtered_models = [m["id"] for m in models if "flux" in m["id"].lower() or "sd" in m["id"].lower() or "kolors" in m["id"].lower()]
-                            elif model_type == "video":
-                                filtered_models = [m["id"] for m in models if "video" in m["id"].lower() or "svd" in m["id"].lower()]
-                        
-                        # 如果还是没有，返回所有（原行为）或前几个
-                        if not filtered_models:
-                            return [m["id"] for m in models[:20]]
-                             
-                        return filtered_models
-                    else:
-                        logger.error(f"获取SiliconFlow模型失败: {response.text}")
-                        return []
-            except Exception as e:
-                logger.error(f"获取SiliconFlow模型异常: {e}")
-                return []
-        
-        # Custom provider - 返回预定义模型列表
-        elif provider == 'custom':
-            if model_type == "image":
-                return ['gemini-3.1-flash-image-preview','gemini-3-pro-image-preview']
-            elif model_type == "audio":
-                return ['gpt-4o-mini-tts', 'tts-1']
-            elif model_type == "video":
-                return [
-                    'veo3.1',
-                    'veo3.1-components',
-                    'veo3.1-fast',
-                    'veo3.1-4k',
-                    'veo3.1-components-4k'
-                ]
-            else:  # text
-                return ['gemini-3.1-flash-lite-preview','gemini-3.1-pro-preview']
-        
-        # Other provider defaults
-        elif provider == 'openai':
-            if model_type == "image":
-                return ['dall-e-3', 'dall-e-2']
-            elif model_type == "text":
-                return ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']
-            elif model_type == "audio":
-                return ['tts-1', 'tts-1-hd', 'whisper-1']
-        
-        elif provider == 'deepseek':
-            if model_type == "text":
-                return ['deepseek-chat', 'deepseek-reasoner']
+        if api_key.status != APIKeyStatus.ACTIVE:
+            raise ValueError('此 API 密钥未启用')
+        return await get_catalog(api_key.provider, api_key.base_url, api_key.get_api_key(),
+                                 refresh=refresh, include_hidden=include_hidden)
 
-        elif provider == 'google':
-            if model_type == "text":
-                return ['gemini-1.5-pro', 'gemini-1.5-flash']
-            elif model_type == "image":
-                return ['imagen-3']
-        
-        return []
+    async def get_models(self, key_id: str, user_id: str, model_type: str = "text") -> List[str]:
+        if model_type not in {'text', 'image', 'video', 'audio'}:
+            raise ValueError('模型类型无效')
+        catalog = await self.get_model_catalog(key_id, user_id)
+        return [m['id'] for m in catalog['models'] if m['type'] == model_type]
 
 
 __all__ = [

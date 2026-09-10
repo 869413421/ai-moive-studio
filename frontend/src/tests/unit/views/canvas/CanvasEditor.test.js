@@ -4,7 +4,7 @@
 
 import { nextTick, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { mount, flushPromises } from '@vue/test-utils'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import CanvasEditor from '@/views/canvas/CanvasEditor.vue'
 import { useCanvasEditor } from '@/composables/useCanvasEditor'
@@ -28,7 +28,7 @@ vi.mock('@/services/apiKeys', () => ({
 
 vi.mock('@/services/canvas', () => ({
   canvasService: {
-    getModelCatalog: vi.fn().mockResolvedValue({ text: [], image: [], video: [] }),
+    getModelCatalog: vi.fn().mockResolvedValue({ connections: {} }),
     uploadVideo: vi.fn()
   }
 }))
@@ -619,9 +619,10 @@ describe('CanvasEditor assistant wiring', () => {
       api_keys: [{ id: 'key-1', name: '主 Key', provider: 'siliconflow' }]
     })
     canvasService.getModelCatalog.mockResolvedValue({
-      text: [],
-      image: ['image-model-1', 'image-model-2'],
-      video: ['video-model-1']
+      connections: { 'key-1': { models: [
+        { id: 'image-model-1', type: 'image', enabled: true, available: true },
+        { id: 'image-model-2', type: 'image', enabled: true, available: true }
+      ] } }
     })
 
     useCanvasGeneration.mockReturnValue({
@@ -692,7 +693,7 @@ describe('CanvasEditor assistant wiring', () => {
       height: 220,
       z_index: 1,
       content: { prompt: 'hello', promptTokens: [] },
-      generation_config: {},
+      generation_config: { api_key_id: 'key-1', model: 'image-model-1' },
       last_run_status: 'idle',
       last_run_error: null,
       last_output: {},
@@ -749,10 +750,10 @@ describe('CanvasEditor assistant wiring', () => {
         },
         stubs: {
           CanvasConnectionActions: true,
-          CanvasGenerationHistoryDrawer: true,
+          CanvasGenerationHistoryDrawer: { name: 'CanvasGenerationHistoryDrawer', emits: ['select'], template: '<div />' },
           CanvasImageStudio: {
             name: 'CanvasImageStudio',
-            emits: ['generate'],
+            emits: ['generate', 'history'],
             template: '<button class="generate-image" @click="$emit(\'generate\')"></button>'
           },
           CanvasLinkCreateMenu: true,
@@ -768,6 +769,7 @@ describe('CanvasEditor assistant wiring', () => {
       }
     })
 
+    await flushPromises()
     await wrapper.get('.generate-image').trigger('click')
     await Promise.resolve()
     await Promise.resolve()
@@ -777,6 +779,16 @@ describe('CanvasEditor assistant wiring', () => {
     expect(loadHistory).toHaveBeenCalledWith('item-image-1')
     expect(successSpy).toHaveBeenCalled()
     expect(errorSpy).not.toHaveBeenCalled()
+    // Restoring a stored asset must remain possible after its model was hidden.
+    const originalItem = useCanvasEditor.mock.results.at(-1).value.items.value[0]
+    originalItem.generation_config.model = 'hidden-old-model'
+    selectedItem.value = originalItem
+    await nextTick()
+    wrapper.findComponent({ name: 'CanvasImageStudio' }).vm.$emit('history')
+    await flushPromises()
+    wrapper.findComponent({ name: 'CanvasGenerationHistoryDrawer' }).vm.$emit('select', { id: 'old-generation' })
+    await flushPromises()
+    expect(useCanvasGeneration.mock.results.at(-1).value.applyGeneration).toHaveBeenCalledWith(originalItem, 'old-generation')
 
     successSpy.mockRestore()
     errorSpy.mockRestore()

@@ -1,11 +1,7 @@
-import uuid
 import asyncio
 import random
-import io
-import aiohttp
 from typing import List
 
-from fastapi import UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from src.core.exceptions import NotFoundError
@@ -13,7 +9,7 @@ from src.core.logging import get_logger
 from src.models import Sentence, SentenceStatus, Paragraph, Chapter
 from src.services.api_key import APIKeyService
 from src.services.base import BaseService
-from src.services.provider.base import BaseLLMProvider
+from src.services.provider.gateway import GatewayProvider as BaseLLMProvider
 from src.services.provider.factory import ProviderFactory
 from src.utils.storage import get_storage_client
 from openai import RateLimitError
@@ -31,7 +27,8 @@ async def retry_with_backoff(task_fn, max_retries=5):
         try:
             return await task_fn()
         except Exception as e:
-            if attempt == max_retries - 1:
+            # Retrying a timed-out generation may create and charge a duplicate.
+            if getattr(e, 'status_code', None) != 429 or attempt == max_retries - 1:
                 raise
             # 指数退避 + 随机抖动
             sleep_time = delay + random.random() * 0.5
@@ -76,67 +73,8 @@ async def process_sentence(
                 )
             )
 
-            # 检查是否是 base64 响应（Gemini）还是 URL 响应（其他）
-            image_data = result.data[0]
-
-            # gemini 格式要特殊处理
-            if hasattr(image_data, 'b64_json') and image_data.b64_json:
-                # Gemini 返回 base64 数据
-                import base64
-                logger.info(f"[LLM] 使用 base64 数据（Gemini 模型）")
-
-                b64_string = image_data.b64_json
-                content_type = image_data.mime
-                file_ext = content_type.split('/')[-1]
-                logger.info(f"[LLM] Base64 字符串长度: {len(b64_string)},ContentType:{content_type}")
-
-                try:
-                    content = base64.b64decode(b64_string)
-                except Exception as e:
-                    logger.error(f"[LLM] Base64 解码失败: {e}")
-                    raise
-
-            else:
-                # 其他提供商返回 URL
-                image_url = image_data.url
-                logger.info(f"[LLM] 从 URL 下载图片: {image_url}")
-
-                # --- 6. 统一的下载 Session ---
-                async with aiohttp.ClientSession() as http_session:
-                    # --- 下载图片 ---
-                    try:
-                        async with http_session.get(image_url) as resp:
-                            if resp.status != 200:
-                                logger.error(f"[Download] 失败 {resp.status} url={image_url}")
-                            content = await resp.read()
-                            # 要保存为临时文件上传到minio上
-
-                    except Exception as e:
-                        logger.error(f"[Download] 图片下载错误: {e}")
-                        raise
-
-                # 默认格式
-                file_ext = 'jpg'
-                content_type = 'image/jpeg'
-
-            # --- 上传 MinIO ---
-            file_id = str(uuid.uuid4())
-            upload_file = UploadFile(
-                filename=f"{file_id}.{file_ext}",
-                file=io.BytesIO(content),
-            )
-
-            storage_result = await storage_client.upload_file(
-                user_id=user_id,
-                file=upload_file,
-                metadata={
-                    "user_id": user_id,
-                    "file_id": file_id,
-                    "file_type": content_type,
-                    "original_filename": f"{file_id}.{file_ext}"
-                }
-            )
-            object_key = storage_result["object_key"]
+            from src.utils.image_utils import extract_and_upload_image
+            object_key = await extract_and_upload_image(result, user_id)
 
             # --- 更新数据库 ---
             sentence.image_url = object_key
@@ -182,12 +120,7 @@ class ImageService(BaseService):
         api_key = await api_key_service.get_api_key_by_id(api_key_id, user_id)
 
         # --- 3. LLM Provider ---
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            max_concurrency=20,
-            base_url=api_key.base_url if api_key.base_url else None,
-        )
+        llm_provider = ProviderFactory.from_key(api_key, max_concurrency=20)
         logger.info(f"[LLM] 使用 Provider: {llm_provider}, API Key ID: {api_key.id},Base URL: {api_key.base_url}")
 
         # --- 4. 创建统一并发控制 ---
