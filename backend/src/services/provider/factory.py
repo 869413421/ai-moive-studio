@@ -29,5 +29,8 @@ class ProviderFactory:
             case "vectorengine":
                 from .vector_engine_provider import VectorEngineProvider
                 return VectorEngineProvider(api_key, kwargs.get("base_url", "https://api.vectorengine.ai/v1")) # type: ignore
+            case "twelvelabs":
+                from .twelvelabs_provider import TwelveLabsProvider
+                return TwelveLabsProvider(api_key, kwargs.get("base_url", "https://api.twelvelabs.io/v1.3")) # type: ignore
             case _:
                 raise ValueError(f"未知 provider: {provider}")

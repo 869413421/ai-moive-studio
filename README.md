@@ -203,6 +203,20 @@ docker-compose -f docker-compose.prod.yml up -d
 - 前端 API 密钥管理页：`frontend/src/views/APIKeys.vue`
 - 前端设置页 API 密钥面板：`frontend/src/views/settings/APIKeysSettings.vue`
 
+### 3.1 可选：TwelveLabs 视频理解 / 多模态向量
+
+项目内置了一个 **可选** 的 [TwelveLabs](https://twelvelabs.io) 供应商，用于视频理解与素材检索，完全不影响现有行为——不配置 TwelveLabs API Key 时系统一切照旧。
+
+- **Pegasus（视频理解）**：对成片或素材视频做内容分析，可用于自动生成分镜描述、镜头摘要、内容审核等创作辅助。
+- **Marengo（多模态向量）**：为视频 / 文本生成 512 维向量，可用于素材库语义检索、画布节点之间的素材匹配与去重。
+
+配置方式与其它供应商一致：在“API 密钥管理”页面新增一条 `provider = twelvelabs` 的密钥即可。免费额度可在 https://twelvelabs.io 获取。
+
+相关代码位置：
+
+- 后端供应商封装：`backend/src/services/provider/twelvelabs_provider.py`
+- 单元 / 集成测试：`backend/tests/unit/test_twelvelabs_provider.py`
+
 ### 4. 开始创作
 
 基本流程如下：

@@ -369,7 +369,14 @@ class APIKeyService(BaseService):
                 return ['gemini-1.5-pro', 'gemini-1.5-flash']
             elif model_type == "image":
                 return ['imagen-3']
-        
+
+        # TwelveLabs - 视频理解(Pegasus) 与 多模态向量(Marengo)
+        elif provider == 'twelvelabs':
+            if model_type == "video":
+                return ['pegasus1.5']
+            elif model_type == "embedding":
+                return ['marengo3.0']
+
         return []
 
 

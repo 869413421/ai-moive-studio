@@ -21,7 +21,7 @@ class APIKeyCreate(BaseModel):
     @classmethod
     def validate_provider(cls, v: str) -> str:
         """验证服务提供商"""
-        valid_providers = ['openai', 'azure', 'google', 'baidu', 'alibaba', 'volcengine', 'custom', 'deepseek','siliconflow']
+        valid_providers = ['openai', 'azure', 'google', 'baidu', 'alibaba', 'volcengine', 'custom', 'deepseek','siliconflow','twelvelabs']
         if v.lower() not in valid_providers:
             raise ValueError(f"无效的服务提供商。支持的提供商: {', '.join(valid_providers)}")
         return v.lower()
