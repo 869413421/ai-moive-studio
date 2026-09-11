@@ -8,6 +8,9 @@ import { get, post, put, del } from './api'
  * API密钥管理服务
  */
 export const apiKeysService = {
+    async getProviderPresets() {
+        return await get('/api-keys/provider-presets')
+    },
     /**
      * 获取API密钥列表
      * @param {Object} params - 查询参数
@@ -103,8 +106,7 @@ export const apiKeyUtils = {
             'alibaba': '阿里云',
             'volcengine': '火山引擎',
             'custom': '自定义',
-            'siliconflow': 'SiliconFlow',
-            'atlascloud': 'Atlas Cloud'
+            'siliconflow': 'SiliconFlow'
         }
         return providerMap[provider] || provider
     },
@@ -151,8 +153,7 @@ export const apiKeyUtils = {
             'alibaba': 'Cloudy',
             'volcengine': 'Cloudy',
             'custom': 'Setting',
-            'siliconflow': 'Cloudy',
-            'atlascloud': 'Cloudy'
+            'siliconflow': 'Cloudy'
         }
         return iconMap[provider] || 'Key'
     },
@@ -182,32 +183,6 @@ export const apiKeyUtils = {
     formatNumber(num) {
         if (num === null || num === undefined) return '0'
         return num.toLocaleString()
-    },
-
-    /**
-     * 获取提供商列表
-     * @returns {Array} 提供商选项列表
-     */
-    getProviderOptions() {
-        return [
-            // { label: 'OpenAI', value: 'openai' },
-            // { label: 'Azure OpenAI', value: 'azure' },
-            // { label: 'Google AI', value: 'google' },
-            // { label: '百度文心', value: 'baidu' },
-            // { label: '阿里云', value: 'alibaba' },
-            // { label: '火山引擎', value: 'volcengine' },
-            // { label: 'deepseek', value: 'deepseek' },
-            { label: '硅基流动', value: 'siliconflow' },
-            { label: 'Atlas Cloud', value: 'atlascloud' },
-            { label: '自定义', value: 'custom' }
-        ]
-    },
-
-    getProviderDefaultBaseUrl(provider) {
-        const baseUrlMap = {
-            'atlascloud': 'https://api.atlascloud.ai/v1'
-        }
-        return baseUrlMap[provider] || 'https://api.aiconapi.me/v1'
     },
 
     /**

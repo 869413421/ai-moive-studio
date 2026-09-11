@@ -179,7 +179,7 @@ class BatchGenerateAvatarsRequest(BaseModel):
 # --- 生产相关 ---
 class ShotProduceRequest(BaseModel):
     api_key_id: str
-    model: Optional[str] = "veo_3_1-fast"
+    model: Optional[str] = None
 
 class BatchProduceRequest(BaseModel):
     api_key_id: str
@@ -198,7 +198,7 @@ class StoryboardExtractRequest(BaseModel):
 class TransitionGenerateRequest(BaseModel):
     api_key_id: str
     model: Optional[str] = None
-    video_model: Optional[str] = "veo_3_1-fast"
+    video_model: Optional[str] = None
     prompt: Optional[str] = None  # 自定义视频提示词
 
 class TransitionResponse(BaseModel):

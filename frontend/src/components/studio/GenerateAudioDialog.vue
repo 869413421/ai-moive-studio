@@ -22,7 +22,6 @@
           placeholder="选择语音风格" 
           style="width: 100%"
           filterable
-          allow-create
           default-first-option
         >
           <el-option
@@ -41,7 +40,6 @@
           style="width: 100%"
           :loading="loadingModels"
           filterable
-          allow-create
           default-first-option
         >
           <el-option
@@ -94,37 +92,14 @@ const emit = defineEmits(['update:visible', 'generate-success'])
 
 const dialogVisible = ref(props.visible)
 const selectedApiKey = ref('')
-const voice = ref('alloy')
-const model = ref('tts-1')
+const voice = ref('')
+const model = ref('')
 const modelOptions = ref([])
 const loadingModels = ref(false)
 const voiceOptions = ref([])
 const generating = ref(false)
 
-// 默认语音选项（OpenAI 风格）
-const defaultVoiceOptions = [
-  { label: 'Alloy (通用)', value: 'alloy' },
-  { label: 'Echo (男声)', value: 'echo' },
-  { label: 'Fable (男声)', value: 'fable' },
-  { label: 'Onyx (深沉男声)', value: 'onyx' },
-  { label: 'Nova (女声)', value: 'nova' },
-  { label: 'Shimmer (清脆女声)', value: 'shimmer' }
-]
-
-// 硅基流动预置语音（格式：模型:音色）
-const getSiliconFlowVoiceOptions = (model) => {
-  const baseModel = model || 'FunAudioLLM/CosyVoice2-0.5B'
-  return [
-    { label: '沉稳男声 (alex)', value: `${baseModel}:alex` },
-    { label: '低沉男声 (benjamin)', value: `${baseModel}:benjamin` },
-    { label: '磁性男声 (charles)', value: `${baseModel}:charles` },
-    { label: '欢快男声 (david)', value: `${baseModel}:david` },
-    { label: '沉稳女声 (anna)', value: `${baseModel}:anna` },
-    { label: '激情女声 (bella)', value: `${baseModel}:bella` },
-    { label: '温柔女声 (claire)', value: `${baseModel}:claire` },
-    { label: '欢快女声 (diana)', value: `${baseModel}:diana` }
-  ]
-}
+const catalogModels = ref([])
 
 const sentencesCount = computed(() => {
   return Array.isArray(props.sentencesIds) ? props.sentencesIds.length : 1
@@ -135,60 +110,32 @@ watch(() => props.visible, (newValue) => {
   dialogVisible.value = newValue
 })
 
-// 监听selectedApiKey变化，获取可用模型
-watch(selectedApiKey, async (newKeyId) => {
-  if (!newKeyId) {
-    modelOptions.value = []
-    model.value = 'tts-1'
-    voiceOptions.value = defaultVoiceOptions
-    voice.value = 'alloy'
-    return
-  }
-  
-  // 检查是否是硅基流动
-  const selectedKey = props.apiKeys.find(k => k.id === newKeyId)
-  const isSiliconFlow = selectedKey?.provider?.toLowerCase() === 'siliconflow'
-  
-  loadingModels.value = true
+watch(selectedApiKey, async (newKeyId, _, onCleanup) => {
+  let current = true
+  onCleanup(() => { current = false })
+  modelOptions.value = []
+  catalogModels.value = []
+  model.value = ''
+  voice.value = ''
+  loadingModels.value = Boolean(newKeyId)
+  if (!newKeyId) return
   try {
-    const models = await api.get(`/api-keys/${newKeyId}/models?type=audio`)
-    modelOptions.value = models || []
-    // 如果有模型，自动选择第一个
-    if (modelOptions.value.length > 0) {
-      model.value = modelOptions.value[0]
-    } else {
-      model.value = 'tts-1'
-    }
-    
-    // 根据供应商设置语音选项
-    if (isSiliconFlow) {
-      voiceOptions.value = getSiliconFlowVoiceOptions(model.value)
-      voice.value = voiceOptions.value[0].value
-    } else {
-      voiceOptions.value = defaultVoiceOptions
-      voice.value = 'alloy'
-    }
+    const catalog = await api.get(`/api-keys/${newKeyId}/model-catalog`)
+    if (!current) return
+    catalogModels.value = (catalog.models || []).filter(m => m.type === 'audio')
+    modelOptions.value = catalogModels.value.map(m => m.id)
+    model.value = modelOptions.value.includes(catalog.defaults?.audio) ? catalog.defaults.audio : (modelOptions.value[0] || '')
   } catch (error) {
-    console.error('获取模型列表失败', error)
-    ElMessage.warning('获取模型列表失败')
-    modelOptions.value = []
-    model.value = 'tts-1'
-    voiceOptions.value = defaultVoiceOptions
-    voice.value = 'alloy'
+    if (current) ElMessage.warning('获取配音模型失败，请检查密钥')
   } finally {
-    loadingModels.value = false
+    if (current) loadingModels.value = false
   }
 })
 
-// 监听模型变化，更新硅基流动的语音选项
 watch(model, (newModel) => {
-  const selectedKey = props.apiKeys.find(k => k.id === selectedApiKey.value)
-  const isSiliconFlow = selectedKey?.provider?.toLowerCase() === 'siliconflow'
-  
-  if (isSiliconFlow && newModel) {
-    voiceOptions.value = getSiliconFlowVoiceOptions(newModel)
-    voice.value = voiceOptions.value[0].value
-  }
+  const config = catalogModels.value.find(m => m.id === newModel)
+  voiceOptions.value = (config?.voices || []).map(value => ({ label: value, value }))
+  voice.value = config?.default_voice || ''
 })
 
 // 监听dialogVisible变化，通知父组件
@@ -210,16 +157,16 @@ const handleCancel = () => {
 // 重置表单
 const resetForm = () => {
   selectedApiKey.value = ''
-  voice.value = 'alloy'
-  model.value = 'tts-1'
+  voice.value = ''
+  model.value = ''
   modelOptions.value = []
-  voiceOptions.value = defaultVoiceOptions
+  voiceOptions.value = []
 }
 
 // 处理生成音频
 const handleGenerate = async () => {
-  if (!selectedApiKey.value) {
-    ElMessage.warning('请选择API Key')
+  if (!selectedApiKey.value || !model.value || !voice.value || loadingModels.value) {
+    ElMessage.warning('请选择可用的密钥、模型和音色')
     return
   }
   

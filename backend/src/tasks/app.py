@@ -46,6 +46,10 @@ celery_app.conf.update(
     task_reject_on_worker_lost=True,
     result_expires=3600,
     beat_schedule={
+        "sync-canvas-video-status-every-30s": {
+            "task": "canvas.sync_video_status",
+            "schedule": 30.0,
+        },
         "sync-video-status-every-30s": {
             "task": "movie.sync_transition_video_status",
             "schedule": 30.0,

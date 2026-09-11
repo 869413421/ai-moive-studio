@@ -439,7 +439,7 @@ const createFormData = ref({
 
 const batchGenerateFormData = ref({
   apiKeyId: '',
-  videoModel: 'veo3.1-components'
+  videoModel: ''
 })
 
 const editPromptFormData = ref({
@@ -452,7 +452,7 @@ const editPromptFormData = ref({
 const singleGenerateFormData = ref({
   transitionId: '',
   apiKeyId: '',
-  videoModel: 'veo3.1-components',
+  videoModel: '',
   prompt: ''
 })
 
@@ -502,7 +502,7 @@ watch(() => createFormData.value.apiKeyId, async (newKeyId) => {
 watch(() => batchGenerateFormData.value.apiKeyId, async (newKeyId) => {
   if (!newKeyId) {
     videoModelOptions.value = []
-    batchGenerateFormData.value.videoModel = 'veo_3_1-fast'
+    batchGenerateFormData.value.videoModel = ''
     return
   }
   
@@ -510,14 +510,15 @@ watch(() => batchGenerateFormData.value.apiKeyId, async (newKeyId) => {
   try {
     const models = await api.get(`/api-keys/${newKeyId}/models?type=video`)
     videoModelOptions.value = models || []
+    batchGenerateFormData.value.videoModel = ''
     if (videoModelOptions.value.length > 0) {
       batchGenerateFormData.value.videoModel = videoModelOptions.value[0]
     }
   } catch (error) {
     console.error('获取模型列表失败', error)
     ElMessage.warning('获取模型列表失败')
-    videoModelOptions.value = ['veo_3_1-fast']
-    batchGenerateFormData.value.videoModel = 'veo_3_1-fast'
+    videoModelOptions.value = []
+    batchGenerateFormData.value.videoModel = ''
   } finally {
     loadingVideoModels.value = false
   }
@@ -526,7 +527,7 @@ watch(() => batchGenerateFormData.value.apiKeyId, async (newKeyId) => {
 watch(() => singleGenerateFormData.value.apiKeyId, async (newKeyId) => {
   if (!newKeyId) {
     videoModelOptions.value = []
-    singleGenerateFormData.value.videoModel = 'veo_3_1-fast'
+    singleGenerateFormData.value.videoModel = ''
     return
   }
   
@@ -535,14 +536,15 @@ watch(() => singleGenerateFormData.value.apiKeyId, async (newKeyId) => {
     const models = await api.get(`/api-keys/${newKeyId}/models?type=video`)
     // API直接返回数组
     videoModelOptions.value = Array.isArray(models) ? models : []
+    singleGenerateFormData.value.videoModel = ''
     if (videoModelOptions.value.length > 0) {
       singleGenerateFormData.value.videoModel = videoModelOptions.value[0]
     }
   } catch (error) {
     console.error('获取模型列表失败', error)
     ElMessage.warning('获取模型列表失败')
-    videoModelOptions.value = ['veo_3_1-fast']
-    singleGenerateFormData.value.videoModel = 'veo_3_1-fast'
+    videoModelOptions.value = []
+    singleGenerateFormData.value.videoModel = ''
   } finally {
     loadingVideoModels.value = false
   }
@@ -601,7 +603,7 @@ const handleCreateConfirm = async () => {
 const handleBatchGenerateClick = () => {
   batchGenerateFormData.value = {
     apiKeyId: props.apiKeys[0]?.id || '',
-    videoModel: 'veo3.1-components'
+    videoModel: ''
   }
   showBatchGenerateDialog.value = true
 }
@@ -659,7 +661,7 @@ const handleGenerateVideo = (transition) => {
   singleGenerateFormData.value = {
     transitionId: transition.id,
     apiKeyId: props.apiKeys[0]?.id || '',
-    videoModel: 'veo_3_1-fast',
+    videoModel: '',
     prompt: transition.video_prompt || ''
   }
   showSingleGenerateDialog.value = true
@@ -670,7 +672,7 @@ const handleRegenerateVideo = (transition) => {
   singleGenerateFormData.value = {
     transitionId: transition.id,
     apiKeyId: props.apiKeys[0]?.id || '',
-    videoModel: 'veo_3_1-fast',
+    videoModel: '',
     prompt: transition.video_prompt || ''
   }
   showSingleGenerateDialog.value = true

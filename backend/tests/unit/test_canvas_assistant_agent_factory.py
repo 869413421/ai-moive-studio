@@ -41,6 +41,7 @@ async def test_tool_calling_model_bind_tools_does_not_deepcopy_async_session() -
 @pytest.mark.asyncio
 async def test_tool_calling_model_serializes_uuid_observation_summary() -> None:
     class _FakeAPIKey:
+        status = "active"
         provider = "custom"
         base_url = "https://example.com"
 

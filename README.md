@@ -1,3 +1,18 @@
+<div align="center">
+
+## 🤝 赞助支持 · 秘塔科技
+
+[![MetaSota 秘塔科技](docs/media/metasota-logo.png)](https://metaso.cn/minimax-h3/?s=AICON)
+
+**MiniMax H3 视频生成 API｜秘塔科技**
+
+秘塔科技提供高性价比的 MiniMax H3 视频生成服务：**768P 仅 0.09 元/秒，2K 仅 0.15 元/秒**。支持原生 2K、音画同步，API 兼容 **OpenAI 协议**，同时支持 **ComfyUI**，无需自行部署 GPU。
+
+🎁 通过 [AICON 专属链接注册](https://metaso.cn/minimax-h3/?s=AICON)，即可领取赠送额度及专属优惠。
+
+</div>
+
+---
 # AICON
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
@@ -14,10 +29,19 @@ AICON 是一套面向 AI 内容创作的全栈工作台，覆盖从文本理解�
 
 技术栈：`FastAPI`、`Vue 3`、`PostgreSQL`、`Redis`、`Celery`、`MinIO`
 
-> 说明：本人目前在广州地区求职中，具备丰富的 AI 应用开发经验，包括 Agent、RAG 等方向，欢迎相关技术岗位与合作机会交流。
+## 更新告知
+
+**2026-09-10 · 中转站迁移与模型供应统一**
+
+中转站现已更换为 [https://api.aicon-studio.com/](https://api.aicon-studio.com/)，模型调用接口保持不变。OpenAI 兼容连接请使用 `https://api.aicon-studio.com/v1`，其他协议路径见 [API 接口文档](https://dcsynw64g3.apifox.cn/)。已有用户请在“API 密钥管理”中更新 Base URL。
+
+本次代码更新统一了模型供应入口：从站点动态获取模型目录，结合密钥权限展示精选模型；默认提供文本 10、图片 8、视频 5、配音 5 个，每类最多 15 个，其余隐藏。同协议新模型可通过配置启用，无需修改业务代码；有可靠发布日期的模型按最新排序。
+
+升级时需应用数据库迁移 `030`，并同步更新 API、Worker 和 Beat。具体步骤与验证范围见[模型供应接入指南](docs/model-provider-configuration.md)和[自审记录](docs/model-provider-review.md)。
 
 ## 目录
 
+- [更新告知](#更新告知)
 - [项目概览](#项目概览)
 - [核心功能](#核心功能)
 - [适用场景](#适用场景)
@@ -159,9 +183,11 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ### 1. 获取 API Key
 
-系统支持多种模型供应商；如果你希望直接体验项目当前默认兼容链路，可以使用：
+系统支持多种模型供应商；项目作者提供的兼容中转站现已迁移至：
 
-- 注册地址：[https://api.aiconapi.me/](https://api.aiconapi.me/)
+- 注册地址：[https://api.aicon-studio.com/](https://api.aicon-studio.com/)
+- 调用文档：[API 接口文档](https://dcsynw64g3.apifox.cn/)
+- 模型广场数据：[模型与价格接口](https://api.aicon-studio.com/api/pricing)
 - 注册并购买额度后，在令牌页面创建 API Key
 - 建议按需购买
 
@@ -171,22 +197,32 @@ docker-compose -f docker-compose.prod.yml up -d
 
 - 供应商：选择 `自定义`
 - API 密钥：填写你自己的令牌
-- Base URL：默认值为 `https://api.aiconapi.me/v1`
+- Base URL：填写 `https://api.aicon-studio.com/v1`
 
 注意：
 
-- Base URL 结尾不要带斜杠，例如不要写成 `https://api.aiconapi.me/v1/`
+- Base URL 结尾不要带斜杠，例如不要写成 `https://api.aicon-studio.com/v1/`
+- 已有密钥请在编辑页面将旧站点的 Base URL 改为上述新地址；调用接口保持不变。
+- 新建自定义连接默认使用新站点。运行时会把旧 AICON 域名归一化为新域名；其他自定义地址保持原样。已有未完成视频使用提交时的协议快照，变更连接后需恢复原连接才能继续查询。
 
 ### 3. 关于中转站
 
-`https://api.aiconapi.me/v1` 是项目作者自部署的大模型兼容中转站，目标是提供长期可用、相对低价的默认接入方式，并非强制绑定。
+`https://api.aicon-studio.com/` 是项目作者自部署的大模型兼容中转站，目标是提供长期可用、相对低价的接入方式，并非强制绑定。OpenAI 兼容调用的 Base URL 为 `https://api.aicon-studio.com/v1`，其他协议路径请参考接口文档。
 
-如果你已有自己的兼容网关、代理层或模型供应商，可以直接修改 Base URL，也可以进一步调整代码中的供应商兼容逻辑。
+如果你已有自己的兼容网关、代理层或模型供应商，可以配置 Base URL，并在精选配置的 `sources` 中声明该连接适用的模型和协议。现有密钥与作品保留；未配置用途与协议的型号保持隐藏。
+
+模型列表由后端动态获取，并取 **站点目录 ∩ 密钥 `/v1/models` 权限 ∩ 已启用精选配置**。内置精选为文本 10、图片 8、视频 5、配音 5 个；每类上限 15 个，其余隐藏。不同模型按配置使用 Chat、Responses、图片生成/编辑、Gemini、视频异步任务、TTS 等协议，响应转换为业务统一结果。
+
+同协议的新模型只需修改 [models.json](backend/src/services/provider/models.json)，不需要改业务代码或重新构建。配置在下次请求时重读；新增远端型号默认隐藏，不能仅凭名称猜用途。已核实的 `released_at` 按最新日期排序，未核实日期的型号按配置顺序排在后面；站点 `updated_time` 不当作发布日期。
+
+配置、接口、迁移和验证说明见[模型供应接入指南](docs/model-provider-configuration.md)，调查依据见[协议审计](docs/model-provider-protocol-audit.md)。上线前需应用数据库迁移 `030` 并更新 API / Worker / Beat。
 
 相关代码位置：
 
 - 后端供应商工厂：`backend/src/services/provider/factory.py`
-- 后端自定义供应商封装：`backend/src/services/provider/custom_provider.py`
+- 后端统一协议适配：`backend/src/services/provider/gateway.py`
+- 动态模型目录：`backend/src/services/provider/catalog.py`
+- 精选模型与协议配置：`backend/src/services/provider/models.json`
 - 前端 API 密钥管理页：`frontend/src/views/APIKeys.vue`
 - 前端设置页 API 密钥面板：`frontend/src/views/settings/APIKeysSettings.vue`
 
@@ -201,13 +237,22 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## 更新日志
 
+### 2026-09-10
+
+- 中转站入口更新为 [https://api.aicon-studio.com/](https://api.aicon-studio.com/)，同步更新连接配置与接口文档链接。
+- 合并分散的模型供应商实现，统一处理文本、图片、视频和配音的不同请求协议与响应格式。
+- 模型选择改为站点目录、密钥权限与精选配置的交集；每类最多展示 15 个，未启用型号保持隐藏。
+- 支持配置热更新，以及按已核实的发布日期降序展示；未核实日期的型号按配置顺序排在后面。
+- 图片比例、参考图限制和配音音色随模型能力配置加载。
+- 保存视频任务的提交协议与连接信息，支持后台持续查询；升级需执行数据库迁移 `030`。
+
 ### 2026-04-03
 
 - 新增 `Canvas` 无限画布工作台
 - 支持节点引用生成
 - 支持生成历史回看与切换
 - JWT TOKEN 默认有效期调整为 `7` 天，即 `10080` 分钟
-- `custom` 供应商默认 Base URL 调整为 `https://api.aiconapi.me/v1`
+- 调整 `custom` 供应商默认 Base URL；中转站现已迁移，当前地址见[更新告知](#更新告知)。
 
 ### 2026-04-06
 

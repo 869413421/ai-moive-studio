@@ -20,7 +20,7 @@ from src.models import Sentence, APIKey, ChapterStatus, SentenceStatus, Paragrap
 from src.services import ChapterService
 from src.services.api_key import APIKeyService
 from src.services.base import BaseService
-from src.services.provider.base import BaseLLMProvider
+from src.services.provider.gateway import GatewayProvider as BaseLLMProvider
 from src.services.provider.factory import ProviderFactory
 
 logger = get_logger(__name__)
@@ -55,17 +55,7 @@ async def process_sentence(
     Raises:
         Exception: LLM 调用失败等异常
     """
-    # 如果提供了model参数，优先使用；否则根据供应商选择默认模型
-    if model:
-        model_name = model
-    else:
-        model_name = "deepseek-v3-250324"
-        if api_key.provider == "deepseek":
-            model_name = "deepseek-chat"
-        if api_key.provider == "volcengine":
-            model_name = "doubao-pro"
-        if api_key.provider == "siliconflow":
-            model_name = "deepseek-ai/DeepSeek-V3.1-Terminus"
+    model_name = model
 
     logger.debug(f"[LLM] 使用模型: {model_name} (Provider: {api_key.provider})")
     # 使用信号量控制并发，避免过度同时请求
@@ -192,12 +182,7 @@ class PromptService(BaseService):
         """
 
         # 创建 LLM provider 实例
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            max_concurrency=20,
-            base_url=api_key.base_url if api_key.base_url else None,
-        )
+        llm_provider = ProviderFactory.from_key(api_key, max_concurrency=20)
 
         # 建立并发信号量（限制同一时刻的 LLM 请求数量）
         semaphore = asyncio.Semaphore(20)

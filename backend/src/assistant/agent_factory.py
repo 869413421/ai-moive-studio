@@ -242,6 +242,8 @@ class CanvasAssistantToolCallingChatModel(BaseChatModel):
 
     async def _agenerate(self, messages: list[BaseMessage], stop=None, run_manager=None, **kwargs: Any) -> ChatResult:
         api_key = await self.api_key_service.get_api_key_by_id(self.api_key_id, self.user_id)
+        if api_key.status != 'active':
+            raise ValueError('此 API 密钥未启用')
         provider = self.provider_factory.create(
             provider=api_key.provider,
             api_key=api_key.get_api_key(),

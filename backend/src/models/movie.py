@@ -149,6 +149,7 @@ class MovieShotTransition(BaseModel):
     video_prompt = Column(Text, comment="视频生成提示词")
     video_url = Column(String(500), comment="生成的视频URL")
     video_task_id = Column(String(100), comment="视频生成任务ID")
+    provider_context_json = Column(JSON, nullable=True, comment="提交时的供应协议和连接快照")
     status = Column(String(20), default="pending", index=True, comment="生成状态")
     error_message = Column(Text, nullable=True, comment="失败错误信息")
     

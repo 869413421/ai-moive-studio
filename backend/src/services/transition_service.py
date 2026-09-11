@@ -55,11 +55,7 @@ class TransitionService(BaseService):
             1. 过渡视频基于首尾关键帧，视觉一致性由视频模型保证
             2. 只需要角色名称，不需要详细外貌描述
         """
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        llm_provider = ProviderFactory.from_key(api_key)
 
         from src.services.movie_prompts import MoviePromptTemplates
 
@@ -361,65 +357,12 @@ class TransitionService(BaseService):
             "message": f"创建完成: 新建 {success_count}, 跳过 {skipped_count}"
         }
 
-    async def _load_keyframes_as_base64(self, from_shot_id: str, to_shot_id: str) -> list:
-        """
-        加载前后分镜的关键帧并转换为base64 data URL
-        
-        Args:
-            from_shot_id: 起始分镜ID
-            to_shot_id: 结束分镜ID
-            
-        Returns:
-            list: base64 data URL列表
-        """
-        import base64
-        import aiohttp
-        from datetime import timedelta
-        from src.utils.storage import get_storage_client
-        
-        # 加载分镜
-        from_shot = await self.db_session.get(MovieShot, from_shot_id)
-        to_shot = await self.db_session.get(MovieShot, to_shot_id)
-        
-        keyframe_images = []
-        
-        for shot, shot_name in [(from_shot, "from"), (to_shot, "to")]:
-            if not shot or not shot.keyframe_url:
-                continue
-            
-            try:
-                # 如果是MinIO key，直接从内部存储获取，避免 localhost 访问失败
-                keyframe_url = shot.keyframe_url
-                img_data = None
-                
-                if keyframe_url.startswith("uploads/"):
-                    storage_client = await get_storage_client()
-                    img_data = await storage_client.download_file(keyframe_url)
-                    logger.info(f"成功从内部存储直接加载{shot_name}关键帧数据")
-                else:
-                    # 下载关键帧并转base64
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(keyframe_url, timeout=10) as resp:
-                            if resp.status == 200:
-                                img_data = await resp.read()
-                                logger.info(f"成功通过URL加载{shot_name}关键帧")
-                            else:
-                                logger.warning(f"下载{shot_name}关键帧失败: HTTP {resp.status}")
-                
-                if img_data:
-                    b64_img = base64.b64encode(img_data).decode('utf-8')
-                    
-                    # 检测MIME类型
-                    mime_type = "image/jpeg"
-                    if img_data[:4] == b'\x89PNG':
-                        mime_type = "image/png"
-                    
-                    # VectorEngine使用data URL格式
-                    keyframe_images.append(f"data:{mime_type};base64,{b64_img}")
-            except Exception as e:
-                logger.warning(f"处理{shot_name}关键帧失败: {e}")
-        
-        return keyframe_images
+    async def _load_keyframe_references(self, from_shot_id, to_shot_id):
+        from src.services.provider.gateway import video_references
+        shots = [await self.db_session.get(MovieShot, shot_id) for shot_id in (from_shot_id, to_shot_id)]
+        if any(not shot or not shot.keyframe_url for shot in shots):
+            raise ValueError('首尾帧视频需要前后两个分镜的关键帧')
+        return await video_references([shot.keyframe_url for shot in shots])
 
     async def _generate_single_transition_video(
         self,
@@ -444,7 +387,7 @@ class TransitionService(BaseService):
         """
         try:
             # 加载关键帧
-            keyframe_images = await self._load_keyframes_as_base64(
+            keyframe_images = await self._load_keyframe_references(
                 transition.from_shot_id, 
                 transition.to_shot_id
             )
@@ -453,7 +396,8 @@ class TransitionService(BaseService):
             result = await provider.create_video(
                 prompt=transition.video_prompt,
                 model=video_model,
-                images=keyframe_images if keyframe_images else None
+                images=keyframe_images,
+                frames=True
             )
             
             # VectorEngine API返回的是 'id' 字段，不是 'task_id'
@@ -462,6 +406,7 @@ class TransitionService(BaseService):
                 raise ValueError(f"API未返回任务ID: {result}")
             
             # 更新记录
+            transition.provider_context_json = result.get("provider_context")
             transition.video_task_id = task_id
             transition.status = "processing"
             transition.api_key_id = api_key_id
@@ -511,13 +456,7 @@ class TransitionService(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, str(user_id))
         
-        # 使用VectorEngineProvider生成视频
-        from src.services.provider.vector_engine_provider import VectorEngineProvider
-        
-        video_provider = VectorEngineProvider(
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        video_provider = ProviderFactory.from_key(api_key)
         
         # 调用通用生成逻辑
         logger.info(f"开始生成过渡视频: {transition_id}, 模型: {video_model}")
@@ -598,12 +537,7 @@ class TransitionService(BaseService):
                 'script_id': t.script_id
             })
         
-        # 5. 创建VectorEngine provider（可以共享）
-        from src.services.provider.vector_engine_provider import VectorEngineProvider
-        provider = VectorEngineProvider(
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        provider = ProviderFactory.from_key(api_key)
         
         # 6. 定义worker函数（使用独立会话）
         max_concurrent = 5
@@ -704,11 +638,7 @@ class TransitionService(BaseService):
                 api_key = await api_key_service.get_api_key_by_id(transition_api_key_id)
                 
                 # 创建provider
-                from src.services.provider.vector_engine_provider import VectorEngineProvider
-                provider = VectorEngineProvider(
-                    api_key=api_key.get_api_key(),
-                    base_url=api_key.base_url
-                )
+                provider = ProviderFactory.resume_video(api_key, transition.provider_context_json)
                 
                 # 查询任务状态
                 status_data = await provider.get_task_status(transition.video_task_id)

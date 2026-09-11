@@ -13,10 +13,9 @@ from src.core.logging import get_logger
 from src.models import Sentence, SentenceStatus, Paragraph, Chapter
 from src.services.api_key import APIKeyService
 from src.services.base import BaseService
-from src.services.provider.base import BaseLLMProvider
+from src.services.provider.gateway import GatewayProvider as BaseLLMProvider
 from src.services.provider.factory import ProviderFactory
 from src.utils.storage import get_storage_client
-from openai import RateLimitError
 
 logger = get_logger(__name__)
 
@@ -32,12 +31,7 @@ async def retry_with_backoff(task_fn, max_retries=5):
             return await task_fn()
         except Exception as e:
             # 只对 429 或 RateLimitError 做重试，其余立即抛出
-            if (
-                    isinstance(e, RateLimitError)
-                    or "429" in str(e)
-                    or "RateLimit" in str(e)
-                    or "IPM limit" in str(e)
-            ):
+            if getattr(e, 'status_code', None) == 429:
                 if attempt == max_retries - 1:
                     raise
 
@@ -62,8 +56,8 @@ async def process_sentence(
         semaphore: asyncio.Semaphore,
         storage_client,
         user_id: str,
-        voice: str = "alloy",
-        model: str = "tts-1"
+        voice: str = None,
+        model: str = None
 ):
     """
     单句 LLM 音频生成任务（含限流、错误透传）。
@@ -100,7 +94,7 @@ async def process_sentence(
             # --- 上传 MinIO ---
             file_id = str(uuid.uuid4())
             upload_file = UploadFile(
-                filename=f"{file_id}.mp3",
+                filename=f"{file_id}.{response.extension}",
                 file=io.BytesIO(content),
             )
 
@@ -110,8 +104,8 @@ async def process_sentence(
                 metadata={
                     "user_id": user_id,
                     "file_id": file_id,
-                    "file_type": "audio/mpeg",
-                    "original_filename": f"{file_id}.mp3"
+                    "file_type": response.mime,
+                    "original_filename": f"{file_id}.{response.extension}"
                 }
             )
             object_key = storage_result["object_key"]
@@ -123,7 +117,7 @@ async def process_sentence(
                 import os
                 
                 # 下载音频文件到临时位置以计算时长
-                temp_audio_path = os.path.join(tempfile.gettempdir(), f"{file_id}.mp3")
+                temp_audio_path = os.path.join(tempfile.gettempdir(), f"{file_id}.{response.extension}")
                 await storage_client.download_file_to_path(object_key, temp_audio_path)
                 
                 # 获取时长
@@ -158,8 +152,8 @@ async def process_sentence(
 
 class AudioService(BaseService):
 
-    async def generate_audio(self, api_key_id: str, sentence_ids: List[str], voice: str = "alloy",
-                             model: str = "tts-1") -> dict:
+    async def generate_audio(self, api_key_id: str, sentence_ids: List[str], voice: str = None,
+                             model: str = None) -> dict:
         # --- 1. 查询 Sentence ----
         stmt = (
             select(Sentence)
@@ -184,12 +178,7 @@ class AudioService(BaseService):
         api_key = await api_key_service.get_api_key_by_id(api_key_id, user_id)
 
         # --- 3. LLM Provider ---
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            max_concurrency=5,
-            base_url=api_key.base_url if api_key.base_url else None,
-        )
+        llm_provider = ProviderFactory.from_key(api_key, max_concurrency=5)
         logger.info(f"[LLM] 使用 Provider: {llm_provider}, API Key ID: {api_key.id},Base URL: {api_key.base_url}")
 
         # --- 4. 创建统一并发控制 ---

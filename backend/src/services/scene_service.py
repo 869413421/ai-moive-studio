@@ -58,11 +58,7 @@ class SceneService(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, str(chapter.project.owner_id))
         
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        llm_provider = ProviderFactory.from_key(api_key)
 
         # 4. 使用统一的Prompt模板管理器
         from src.services.movie_prompts import MoviePromptTemplates

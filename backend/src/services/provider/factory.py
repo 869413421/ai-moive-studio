@@ -1,39 +1,33 @@
-# src/services/providers/factory.py
-
-from .openai_provider import OpenAIProvider
-from .deepseek_provider import DeepSeekProvider
-from .volcengine_provider import VolcengineProvider
-from .siliconflow_provider import SiliconFlowProvider
-from .custom_provider import CustomProvider
-from .base import BaseLLMProvider
+"""One construction path for configured protocol adapters."""
+from .gateway import GatewayProvider
+from .registry import connection
 
 
 class ProviderFactory:
+    @staticmethod
+    def create(provider: str, api_key: str, **kwargs) -> GatewayProvider:
+        return GatewayProvider(api_key=api_key, provider=provider, **kwargs)
 
     @staticmethod
-    def create(provider: str, api_key: str, **kwargs) -> BaseLLMProvider:
-        provider = provider.lower()
+    def from_key(key, *, context=None, max_concurrency=5):
+        if key.status != 'active':
+            raise ValueError('此 API 密钥未启用')
+        if context:
+            if context.get('version') != 1:
+                raise ValueError('视频任务协议版本不受支持')
+            # Credentials must never be sent to a saved host after the key was moved.
+            current = connection(key.provider, key.base_url)
+            if current['base_url'] != context.get('base_url') or key.provider != context.get('provider'):
+                raise ValueError('密钥连接已变更，请恢复提交任务时的连接后查询')
+        return GatewayProvider(api_key=key.get_api_key(), provider=key.provider,
+                               base_url=key.base_url, context=context, max_concurrency=max_concurrency)
 
-        match provider:
-            case "openai":
-                return OpenAIProvider(api_key, kwargs.get("max_concurrency", 5))
-            case "deepseek":
-                return DeepSeekProvider(api_key, kwargs.get("max_concurrency", 5))
-            case "volcengine":
-                return VolcengineProvider(api_key, kwargs.get("max_concurrency", 5))
-            case "siliconflow":
-                return SiliconFlowProvider(api_key, kwargs.get("max_concurrency", 5))
-            case "custom":
-                return CustomProvider(api_key, kwargs.get("max_concurrency", 5),
-                                      kwargs.get("base_url", "https://api.aiconapi.me/v1"))
-            case "atlascloud":
-                return CustomProvider(
-                    api_key,
-                    kwargs.get("max_concurrency", 5),
-                    kwargs.get("base_url") or "https://api.atlascloud.ai/v1",
-                )
-            case "vectorengine":
-                from .vector_engine_provider import VectorEngineProvider
-                return VectorEngineProvider(api_key, kwargs.get("base_url", "https://api.vectorengine.ai/v1")) # type: ignore
-            case _:
-                raise ValueError(f"未知 provider: {provider}")
+    @staticmethod
+    def resume_video(key, context):
+        if context:
+            return ProviderFactory.from_key(key, context=context)
+        # Only historical tasks lacking a snapshot use the old query contract.
+        if key.status != 'active':
+            raise ValueError('此 API 密钥未启用')
+        from .legacy_video import LegacyVideoQuery
+        return LegacyVideoQuery(key.get_api_key(), key.base_url)

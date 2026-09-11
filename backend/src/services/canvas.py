@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import html
 import inspect
 import io
@@ -30,7 +29,7 @@ from src.models.canvas import (
 from src.services.api_key import APIKeyService
 from src.services.base import BaseService
 from src.services.provider.factory import ProviderFactory
-from src.services.provider.vector_engine_provider import VectorEngineProvider
+from src.services.provider.gateway import GatewayProvider
 from src.utils.storage import get_storage_client
 
 logger = get_logger(__name__)
@@ -43,7 +42,6 @@ PROMPT_HTML_TAG_PATTERN = re.compile(r"(?is)<[^>]+>")
 PROMPT_SPACE_PATTERN = re.compile(r"[ \t]+")
 PROMPT_BLANK_LINE_PATTERN = re.compile(r"\n{3,}")
 REFERENCE_TEXT_LIMIT = 1500
-REFERENCE_IMAGE_LIMIT = 2
 MEDIA_URL_TO_OBJECT_KEY_FIELDS = {
     "result_image_url": "result_image_object_key",
     "reference_image_url": "reference_image_object_key",
@@ -621,7 +619,7 @@ class CanvasGenerationService(BaseService):
             api_key = await self._resolve_api_key(str(generation.user_id), request, item)
             provider = self._build_provider(api_key)
             response = await provider.completions(
-                model=request.get("model") or "gpt-4o-mini",
+                model=request.get("model"),
                 messages=[
                     {"role": "system", "content": "你是一个专业的中文创作助手。请直接输出适合写入画布节点的正文内容。"},
                     {"role": "user", "content": request["prompt"]},
@@ -668,7 +666,7 @@ class CanvasGenerationService(BaseService):
             api_key = await self._resolve_api_key(str(generation.user_id), request_payload, item)
             provider = self._build_provider(api_key)
             stream = await provider.completions(
-                model=request_payload.get("model") or "gpt-4o-mini",
+                model=request_payload.get("model"),
                 messages=[
                     {"role": "system", "content": "你是一个专业的中文创作助手。请直接输出适合写入画布节点的正文内容。"},
                     {"role": "user", "content": request_payload["prompt"]},
@@ -797,22 +795,21 @@ class CanvasGenerationService(BaseService):
             api_key = await self._resolve_api_key(str(generation.user_id), request, item)
             provider = self._build_provider(api_key)
             image_kwargs: Dict[str, Any] = {}
-            if api_key.provider.lower() == "custom":
-                options = request.get("options") or {}
-                aspect_ratio = str(options.get("aspect_ratio") or "").strip()
-                if aspect_ratio:
-                    image_kwargs["aspect_ratio"] = aspect_ratio
-                reference_images = self._resolve_image_reference_inputs(
-                    options.get("style_reference_image_object_key")
-                    or options.get("style_reference_image_url")
-                    or item.content_json.get("reference_image_object_key")
-                    or item.content_json.get("reference_image_url"),
-                    options.get("reference_image_object_keys")
-                    or options.get("reference_image_urls")
-                    or [],
-                )
-                if reference_images:
-                    image_kwargs["reference_images"] = reference_images
+            options = request.get("options") or {}
+            aspect_ratio = str(options.get("aspect_ratio") or "").strip()
+            if aspect_ratio:
+                image_kwargs["aspect_ratio"] = aspect_ratio
+            reference_images = self._resolve_image_reference_inputs(
+                options.get("style_reference_image_object_key")
+                or options.get("style_reference_image_url")
+                or item.content_json.get("reference_image_object_key")
+                or item.content_json.get("reference_image_url"),
+                options.get("reference_image_object_keys")
+                or options.get("reference_image_urls")
+                or [],
+            )
+            if reference_images:
+                image_kwargs["reference_images"] = reference_images
             response = await provider.generate_image(
                 prompt=request["prompt"],
                 model=request.get("model"),
@@ -842,18 +839,16 @@ class CanvasGenerationService(BaseService):
 
     async def process_video_generation(self, generation_id: str) -> Dict[str, Any]:
         generation, item = await self._load_generation_and_item(generation_id, CanvasGenerationType.VIDEO.value)
+        existing = generation.result_payload_json or {}
+        if existing.get("provider_task_id") or generation.status == CanvasRunStatus.COMPLETED.value:
+            return {"generation_id": generation_id, "status": generation.status,
+                    "provider_task_id": existing.get("provider_task_id")}
         canvas_service = CanvasService(self.db_session)
         try:
             await canvas_service.update_generation(generation, item, CanvasRunStatus.PROCESSING.value)
             request = generation.request_payload_json or {}
             api_key = await self._resolve_api_key(str(generation.user_id), request, item)
-            if api_key.provider.lower() not in {"vectorengine", "custom"}:
-                raise BusinessLogicError("当前 API Key 不支持视频生成")
-
-            provider = VectorEngineProvider(
-                api_key=api_key.get_api_key(),
-                base_url=api_key.base_url or "https://api.vectorengine.ai/v1",
-            )
+            provider = self._build_provider(api_key)
             options = request.get("options") or {}
             reference_images = options.get("reference_image_urls") or item.content_json.get("reference_image_urls") or []
             provider_images = await self._resolve_video_reference_images(reference_images)
@@ -865,7 +860,7 @@ class CanvasGenerationService(BaseService):
             response = await provider.create_video(
                 prompt=request["prompt"],
                 images=provider_images,
-                model=request.get("model") or "veo_3_1-fast",
+                model=request.get("model"),
                 **provider_options,
             )
 
@@ -893,19 +888,14 @@ class CanvasGenerationService(BaseService):
                 generation,
                 item,
                 CanvasRunStatus.PROCESSING.value,
-                result_payload={"provider_task_id": provider_task_id, "provider_response": response},
+                result_payload={"provider_task_id": provider_task_id, "provider_response": response,
+                                "provider_context": response.get("provider_context")},
             )
 
-            video_url = await self._poll_video_result(provider, provider_task_id)
-            stored_video_asset = await self._store_remote_video(video_url, str(generation.user_id))
-            await canvas_service.update_generation(
-                generation,
-                item,
-                CanvasRunStatus.COMPLETED.value,
-                result_payload={"provider_task_id": provider_task_id, "result_video_object_key": stored_video_asset.get("object_key")},
-            )
+            # Persist acceptance before leaving the worker. Polling never resubmits a POST.
             await self.commit()
-            return {"generation_id": generation_id, "status": CanvasRunStatus.COMPLETED.value, "result_video_object_key": stored_video_asset.get("object_key")}
+            return {"generation_id": generation_id, "status": CanvasRunStatus.PROCESSING.value,
+                    "provider_task_id": provider_task_id}
         except Exception as exc:
             await canvas_service.update_generation(
                 generation,
@@ -955,10 +945,7 @@ class CanvasGenerationService(BaseService):
             }
 
         api_key = await self._resolve_api_key(user_id, request, item)
-        provider = VectorEngineProvider(
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url or "https://api.vectorengine.ai/v1",
-        )
+        provider = ProviderFactory.resume_video(api_key, (generation.result_payload_json or {}).get("provider_context"))
         try:
             status_payload = await self._fetch_video_status_payload(provider, provider_task_id)
         except Exception as exc:
@@ -993,6 +980,8 @@ class CanvasGenerationService(BaseService):
                     status_payload = {**status_payload, "content": content_payload}
 
         normalized_status = self._normalize_video_provider_status(provider_status)
+        if normalized_status == CanvasRunStatus.COMPLETED.value and not provider_video_url:
+            normalized_status = CanvasRunStatus.PROCESSING.value
         if provider_video_url and normalized_status == CanvasRunStatus.COMPLETED.value:
             stored_video_asset = await self._store_remote_video(provider_video_url, user_id)
             await canvas_service.update_generation(
@@ -1242,7 +1231,7 @@ class CanvasGenerationService(BaseService):
         prompt_tokens: List[Dict[str, Any]],
         resolved_mentions: List[Dict[str, Any]],
         *,
-        limit: int = REFERENCE_IMAGE_LIMIT,
+        limit: Optional[int] = None,
     ) -> List[str]:
         if not prompt_tokens or not resolved_mentions:
             return []
@@ -1294,7 +1283,7 @@ class CanvasGenerationService(BaseService):
             results.append(image_ref)
             if node_id:
                 seen_node_ids.add(node_id)
-            if len(results) >= limit:
+            if limit is not None and len(results) >= limit:
                 break
         return results
 
@@ -1303,7 +1292,7 @@ class CanvasGenerationService(BaseService):
         prompt_tokens: List[Dict[str, Any]],
         resolved_mentions: List[Dict[str, Any]],
         *,
-        limit: int = REFERENCE_IMAGE_LIMIT,
+        limit: Optional[int] = None,
     ) -> List[str]:
         if not prompt_tokens or not resolved_mentions:
             return []
@@ -1354,7 +1343,7 @@ class CanvasGenerationService(BaseService):
             results.append(object_key)
             if node_id:
                 seen_node_ids.add(node_id)
-            if len(results) >= limit:
+            if limit is not None and len(results) >= limit:
                 break
         return results
 
@@ -1498,12 +1487,7 @@ class CanvasGenerationService(BaseService):
         return await service.get_api_key_by_id(str(api_key_id), str(user_id))
 
     def _build_provider(self, api_key: APIKey):
-        return ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            max_concurrency=5,
-            base_url=api_key.base_url if api_key.base_url else None,
-        )
+        return ProviderFactory.from_key(api_key, max_concurrency=5)
 
     async def _iterate_text_stream(self, stream: Any) -> AsyncIterator[str]:
         if hasattr(stream, "__aiter__"):
@@ -1643,34 +1627,8 @@ class CanvasGenerationService(BaseService):
         return resolved
 
     async def _resolve_image_result(self, response: Any, user_id: str) -> Dict[str, Any]:
-        image_data = response.data[0]
-        if hasattr(image_data, "url") and image_data.url:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=20.0)) as client:
-                remote_response = await client.get(image_data.url)
-                remote_response.raise_for_status()
-            storage_client = await get_storage_client()
-            file_id = str(uuid.uuid4())
-            upload_file = UploadFile(filename=f"{file_id}.png", file=io.BytesIO(remote_response.content))
-            storage = await storage_client.upload_file(
-                user_id=user_id,
-                file=upload_file,
-                metadata={"user_id": user_id, "file_id": file_id, "file_type": remote_response.headers.get("content-type", "image/png")},
-            )
-            return {"object_key": storage["object_key"], "url": storage["url"]}
-        if hasattr(image_data, "b64_json") and image_data.b64_json:
-            content_type = getattr(image_data, "mime", "image/png")
-            raw = base64.b64decode(image_data.b64_json)
-            ext = "png" if "png" in content_type else "jpg"
-            storage_client = await get_storage_client()
-            file_id = str(uuid.uuid4())
-            upload_file = UploadFile(filename=f"{file_id}.{ext}", file=io.BytesIO(raw))
-            storage = await storage_client.upload_file(
-                user_id=user_id,
-                file=upload_file,
-                metadata={"user_id": user_id, "file_id": file_id, "file_type": content_type},
-            )
-            return {"object_key": storage["object_key"], "url": storage["url"]}
-        raise BusinessLogicError("图片生成结果不包含可用图片")
+        from src.utils.image_utils import extract_and_upload_image
+        return {"object_key": await extract_and_upload_image(response, user_id)}
 
     async def _store_remote_video(self, video_url: str, user_id: str) -> Dict[str, Any]:
         async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=20.0)) as client:
@@ -1687,44 +1645,8 @@ class CanvasGenerationService(BaseService):
         return {"object_key": storage["object_key"], "url": storage["url"]}
 
     async def _resolve_video_reference_images(self, references: List[str]) -> List[str]:
-        resolved: List[str] = []
-        for reference in references or []:
-            normalized = str(reference or "").strip()
-            if not normalized:
-                continue
-            if normalized.startswith("data:image/"):
-                resolved.append(normalized)
-                continue
-            if normalized.startswith("uploads/"):
-                storage_client = await get_storage_client()
-                image_bytes = await storage_client.download_file(normalized)
-                resolved.append(self._build_image_data_url(image_bytes))
-                continue
-
-            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-                response = await client.get(normalized)
-                response.raise_for_status()
-                resolved.append(self._build_image_data_url(response.content, response.headers.get("content-type")))
-        return resolved
-
-    def _build_image_data_url(self, image_bytes: bytes, content_type: Optional[str] = None) -> str:
-        mime_type = self._detect_image_mime_type(image_bytes, content_type)
-        encoded = base64.b64encode(image_bytes).decode("utf-8")
-        return f"data:{mime_type};base64,{encoded}"
-
-    def _detect_image_mime_type(self, image_bytes: bytes, content_type: Optional[str] = None) -> str:
-        normalized_type = str(content_type or "").strip().lower()
-        if normalized_type.startswith("image/"):
-            return normalized_type.split(";", 1)[0]
-        if image_bytes.startswith(b"\x89PNG"):
-            return "image/png"
-        if image_bytes.startswith(b"\xff\xd8\xff"):
-            return "image/jpeg"
-        if image_bytes.startswith((b"GIF87a", b"GIF89a")):
-            return "image/gif"
-        if image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP":
-            return "image/webp"
-        return "image/jpeg"
+        from src.services.provider.gateway import video_references
+        return await video_references(references)
 
     def _sanitize_media_content(self, content: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(content, dict):
@@ -1752,7 +1674,7 @@ class CanvasGenerationService(BaseService):
                 sanitized.pop(url_field, None)
         return sanitized
 
-    async def _fetch_video_status_payload(self, provider: VectorEngineProvider, provider_task_id: str, *, attempts: int = 3) -> Dict[str, Any]:
+    async def _fetch_video_status_payload(self, provider: GatewayProvider, provider_task_id: str, *, attempts: int = 3) -> Dict[str, Any]:
         last_error = None
         for attempt_index in range(attempts):
             try:
@@ -1770,7 +1692,7 @@ class CanvasGenerationService(BaseService):
                     await asyncio.sleep(2)
         raise last_error
 
-    async def _fetch_video_content_payload(self, provider: VectorEngineProvider, provider_task_id: str, *, attempts: int = 3) -> Dict[str, Any]:
+    async def _fetch_video_content_payload(self, provider: GatewayProvider, provider_task_id: str, *, attempts: int = 3) -> Dict[str, Any]:
         last_error = None
         for attempt_index in range(attempts):
             try:
@@ -1787,41 +1709,6 @@ class CanvasGenerationService(BaseService):
                 if attempt_index < attempts - 1:
                     await asyncio.sleep(2)
         raise last_error
-
-    async def _poll_video_result(self, provider: VectorEngineProvider, provider_task_id: str) -> str:
-        for _ in range(60):
-            try:
-                status_payload = await self._fetch_video_status_payload(provider, provider_task_id)
-            except Exception as exc:
-                logger.warning("Canvas video status fetch transient failure (task=%s): %s", provider_task_id, exc)
-                await asyncio.sleep(5)
-                continue
-
-            state = str(status_payload.get("status") or status_payload.get("state") or "").lower()
-            if state in {"completed", "succeeded", "success", "done"}:
-                video_url = self._extract_video_url(status_payload)
-                if video_url:
-                    return video_url
-                try:
-                    content_payload = await self._fetch_video_content_payload(provider, provider_task_id)
-                except Exception as exc:
-                    logger.warning(
-                        "Canvas video content fetch transient failure after completion (task=%s): %s",
-                        provider_task_id,
-                        exc,
-                    )
-                    await asyncio.sleep(5)
-                    continue
-                video_url = self._extract_video_url(content_payload)
-                if video_url:
-                    return video_url
-                logger.warning("Canvas video task completed without video_url yet (task=%s)", provider_task_id)
-                await asyncio.sleep(5)
-                continue
-            if state in {"failed", "error", "cancelled", "canceled"}:
-                raise BusinessLogicError(status_payload.get("message") or status_payload.get("error") or "视频生成失败")
-            await asyncio.sleep(5)
-        raise BusinessLogicError("视频生成超时，请稍后查看任务状态")
 
     def _extract_video_url(self, payload: Dict[str, Any]) -> Optional[str]:
         if not isinstance(payload, dict):

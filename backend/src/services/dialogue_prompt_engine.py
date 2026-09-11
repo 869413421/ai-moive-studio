@@ -61,11 +61,7 @@ class DialoguePromptEngine(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, str(chapter.project.owner_id))
         
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        llm_provider = ProviderFactory.from_key(api_key)
 
         try:
             system_prompt = "你是一个专业的AI视频提示词优化专家。只输出提示词文本。"
@@ -77,7 +73,7 @@ class DialoguePromptEngine(BaseService):
             )
             
             response = await llm_provider.completions(
-                model="deepseek-chat", # 默认
+                model=None,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},

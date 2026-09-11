@@ -201,11 +201,7 @@ class MovieCharacterService(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, str(chapter.project.owner_id))
         
-        llm_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        llm_provider = ProviderFactory.from_key(api_key)
 
         try:
             prompt = self.EXTRACT_CHARACTERS_PROMPT.format(text=script_text[:5000]) # 限制长度
@@ -325,11 +321,7 @@ class MovieCharacterService(BaseService):
         api_key_service = APIKeyService(self.db_session)
         api_key = await api_key_service.get_api_key_by_id(api_key_id, str(project.owner_id))
 
-        image_provider = ProviderFactory.create(
-            provider=api_key.provider,
-            api_key=api_key.get_api_key(),
-            base_url=api_key.base_url
-        )
+        image_provider = ProviderFactory.from_key(api_key)
         
         # 根据索引获取参考图URL（参考关键帧生成的方式）
         reference_image_urls = []

@@ -110,7 +110,6 @@
             placeholder="选择模型"
             clearable
             filterable
-            allow-create
             default-first-option
             :loading="modelOptionsLoading"
             :disabled="generating || uploading"

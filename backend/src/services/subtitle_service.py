@@ -89,23 +89,9 @@ class SubtitleService:
                 return subtitle_data
 
             # 创建LLM provider
-            llm_provider = ProviderFactory.create(
-                provider=api_key.provider,
-                api_key=api_key.get_api_key(),
-                max_concurrency=1,
-                base_url=api_key.base_url if api_key.base_url else None
-            )
+            llm_provider = ProviderFactory.from_key(api_key, max_concurrency=1)
 
-            # 选择模型
-            if not model:
-                if api_key.provider == "deepseek":
-                    model = "deepseek-chat"
-                elif api_key.provider == "volcengine":
-                    model = "doubao-pro"
-                elif api_key.provider == "siliconflow":
-                    model = "deepseek-ai/DeepSeek-V3.1-Terminus"
-                else:
-                    model = "gpt-4o-mini"
+
 
             # 构建提示词 - 让LLM纠正整个时间轴JSON
             system_prompt = """你是一个专业的字幕纠错助手。你的任务是纠正语音识别字幕中的错别字。

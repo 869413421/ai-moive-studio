@@ -897,7 +897,7 @@ class TestCanvasDocumentApi:
         assert request_payload["options"]["reference_text_ids"] == ["text-ref-1"]
 
     @pytest.mark.asyncio
-    async def test_process_video_generation_converts_object_key_references_to_data_urls(self, db_session):
+    async def test_process_video_generation_persists_submission_and_signed_references(self, db_session):
         from src.models.canvas import CanvasItem, CanvasItemGeneration
         from src.services.canvas import CanvasGenerationService
 
@@ -941,32 +941,33 @@ class TestCanvasDocumentApi:
 
         service = CanvasGenerationService(db_session)
         fake_api_key = Mock()
-        fake_api_key.provider = "vectorengine"
+        fake_api_key.provider = "custom"
+        fake_api_key.status = "active"
         fake_api_key.base_url = "https://api.aiconapi.me/v1"
         fake_api_key.get_api_key.return_value = "test-key"
 
         storage_client = Mock()
-        storage_client.download_file = AsyncMock(return_value=b"\xff\xd8\xff\xdbfake-jpeg")
+        storage_client.get_presigned_url.return_value = "https://media.example/reference.jpg"
 
         with (
             patch.object(service, "_resolve_api_key", AsyncMock(return_value=fake_api_key)),
-            patch("src.services.canvas.get_storage_client", new_callable=AsyncMock, return_value=storage_client),
-            patch("src.services.canvas.VectorEngineProvider.create_video", new_callable=AsyncMock) as create_video,
-            patch.object(service, "_poll_video_result", AsyncMock(return_value="https://example.com/generated.mp4")),
+            patch("src.utils.storage.get_storage_client", new_callable=AsyncMock, return_value=storage_client),
+            patch("src.services.canvas.GatewayProvider.create_video", new_callable=AsyncMock) as create_video,
             patch.object(
                 service,
                 "_store_remote_video",
                 AsyncMock(return_value={"object_key": "uploads/generated.mp4", "url": "https://ignored.example.com/generated.mp4"}),
             ),
         ):
-            create_video.return_value = {"id": "provider-task-1"}
+            create_video.return_value = {"id": "provider-task-1", "provider_context": {"version": 1, "profile": "gateway_video"}}
             result = await service.process_video_generation(str(generation.id))
 
-        assert result["status"] == "completed"
-        assert result["result_video_object_key"] == "uploads/generated.mp4"
+        assert result["status"] == "processing"
+        persisted, _ = await service._load_generation_and_item(str(generation.id), "video")
+        assert persisted.result_payload_json["provider_context"]["profile"] == "gateway_video"
         create_video.assert_awaited_once()
         kwargs = create_video.await_args.kwargs
-        assert kwargs["images"] == ["data:image/jpeg;base64,/9j/22Zha2UtanBlZw=="]
+        assert kwargs["images"] == ["https://media.example/reference.jpg"]
         assert kwargs["aspect_ratio"] == "9:16"
         assert "reference_image_urls" not in kwargs
         assert "reference_text_ids" not in kwargs
@@ -1048,7 +1049,7 @@ class TestCanvasDocumentApi:
         assert "reference_image_object_keys" not in kwargs
 
     @pytest.mark.asyncio
-    async def test_poll_video_result_tolerates_transient_status_failures(self, db_session):
+    async def test_status_fetch_retries_transient_failure_without_resubmission(self, db_session):
         from src.services.canvas import CanvasGenerationService
 
         service = CanvasGenerationService(db_session)
@@ -1060,9 +1061,10 @@ class TestCanvasDocumentApi:
         ])
         provider.get_video_content = AsyncMock()
 
-        result = await service._poll_video_result(provider, "provider-task-1")
-
-        assert result == "https://example.com/generated.mp4"
+        result = await service._fetch_video_status_payload(provider, "provider-task-1")
+        assert result["status"] == "processing"
+        result = await service._fetch_video_status_payload(provider, "provider-task-1")
+        assert result["video_url"] == "https://example.com/generated.mp4"
         assert provider.get_task_status.await_count == 3
         provider.get_video_content.assert_not_called()
 
@@ -1387,12 +1389,13 @@ class TestCanvasDocumentApi:
 
         with (
             patch("src.services.canvas.CanvasGenerationService._resolve_api_key", new_callable=AsyncMock) as resolve_api_key,
-            patch("src.services.canvas.VectorEngineProvider.get_task_status", new_callable=AsyncMock) as get_task_status,
-            patch("src.services.canvas.VectorEngineProvider.get_video_content", new_callable=AsyncMock) as get_video_content,
+            patch("src.services.provider.legacy_video.LegacyVideoQuery.get_task_status", new_callable=AsyncMock) as get_task_status,
+            patch("src.services.provider.legacy_video.LegacyVideoQuery.get_video_content", new_callable=AsyncMock) as get_video_content,
             patch("src.api.v1.canvas.get_storage_client", new_callable=AsyncMock, return_value=storage_client),
         ):
             api_key = Mock()
             api_key.provider = "vectorengine"
+            api_key.status = "active"
             api_key.base_url = "https://api.vectorengine.ai/v1"
             api_key.get_api_key.return_value = "test-key"
             resolve_api_key.return_value = api_key
@@ -1472,11 +1475,12 @@ class TestCanvasDocumentApi:
 
         with (
             patch("src.services.canvas.CanvasGenerationService._resolve_api_key", new_callable=AsyncMock) as resolve_api_key,
-            patch("src.services.canvas.VectorEngineProvider.get_task_status", new_callable=AsyncMock, side_effect=RuntimeError("temporary status failure")),
+            patch("src.services.provider.legacy_video.LegacyVideoQuery.get_task_status", new_callable=AsyncMock, side_effect=RuntimeError("temporary status failure")),
             patch("src.api.v1.canvas.get_storage_client", new_callable=AsyncMock, return_value=storage_client),
         ):
             api_key = Mock()
             api_key.provider = "vectorengine"
+            api_key.status = "active"
             api_key.base_url = "https://api.vectorengine.ai/v1"
             api_key.get_api_key.return_value = "test-key"
             resolve_api_key.return_value = api_key
@@ -1494,7 +1498,7 @@ class TestCanvasDocumentApi:
         assert payload["item"]["last_run_status"] == "pending"
 
     @pytest.mark.asyncio
-    async def test_process_video_generation_keeps_waiting_after_transient_status_failures(self, client, auth_headers):
+    async def test_process_video_generation_is_not_resubmitted_and_recovers_from_transient_poll_failures(self, client, auth_headers):
         create_response = await client.post(
             "/api/v1/canvas-documents",
             headers=auth_headers,
@@ -1565,7 +1569,8 @@ class TestCanvasDocumentApi:
             service = CanvasGenerationService(session)
             with (
                 patch.object(service, "_resolve_api_key", AsyncMock(return_value=fake_api_key)),
-                patch("src.services.canvas.VectorEngineProvider", return_value=provider),
+                patch.object(service, "_build_provider", return_value=provider),
+                patch("src.services.canvas.ProviderFactory.resume_video", return_value=provider),
                 patch("src.services.canvas.asyncio.sleep", new_callable=AsyncMock, return_value=None),
                 patch.object(
                     service,
@@ -1574,6 +1579,13 @@ class TestCanvasDocumentApi:
                 ),
             ):
                 result = await service.process_video_generation(generation_id)
+                assert result["status"] == "processing"
+                await service.process_video_generation(generation_id)
+                provider.create_video.assert_awaited_once()
+                provider.get_task_status.assert_not_awaited()
+                generation, item = await service._load_generation_and_item(generation_id, "video")
+                for _ in range(4):
+                    result = await service.get_video_task_status(str(item.document_id), str(item.id), generation_id, str(generation.user_id))
 
             await session.commit()
 
