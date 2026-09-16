@@ -1,3 +1,21 @@
+# AICON — 开源 AI 视频创作与无限画布工作流
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
+[![Vue](https://img.shields.io/badge/vue-3.x-42b883.svg)](https://vuejs.org/)
+[![FastAPI](https://img.shields.io/badge/fastapi-latest-009688.svg)](https://fastapi.tiangolo.com/)
+[![Docker](https://img.shields.io/badge/deploy-docker-2496ED.svg)](https://www.docker.com/)
+
+**将小说、剧本和创意整理成角色、分镜、图片与视频，在同一工作台中完成 AI 内容创作。**
+
+AICON 是面向创作者和开发者的开源 AI 视频创作平台，支持剧本拆解、角色参考图、分镜与关键帧生成、图文配音、视频合成和内容分发。通过无限画布连接文本、图片和视频节点，用自然语言助手搭建可编辑的创作工作流，也可以通过 Docker 自部署。
+
+AICON is an open-source AI video creation platform with an infinite canvas and a natural-language workflow assistant. Turn scripts into characters, storyboards, images and videos, connect generation steps on a visual canvas, and self-host with Docker.
+
+[在线体验](https://aicon-studio.com/?utm_source=github&utm_medium=readme&utm_campaign=aicon) · [视频演示](#演示) · [快速部署](#快速开始) · [模型接入指南](docs/model-provider-configuration.md) · [问题反馈](https://github.com/869413421/ai-moive-studio/issues)
+
+![AICON 无限画布：通过自然语言助手组织角色、分镜、图片与视频生成节点](docs/media/agent.png)
+
 <div align="center">
 
 ## 🤝 赞助支持 · 秘塔科技
@@ -12,66 +30,79 @@
 
 </div>
 
----
-# AICON
-
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
-[![Vue](https://img.shields.io/badge/vue-3.x-42b883.svg)](https://vuejs.org/)
-[![FastAPI](https://img.shields.io/badge/fastapi-latest-009688.svg)](https://fastapi.tiangolo.com/)
-[![Docker](https://img.shields.io/badge/deploy-docker-2496ED.svg)](https://www.docker.com/)
-
-AICON 是一套面向 AI 内容创作的全栈工作台，覆盖从文本理解、提示词组织、图片与视频生成，到素材管理和内容分发的完整流程，适用于 AI 电影、图文说、剧情短视频和可视化创作工作流等场景。
-
-**自然语言驱动的开源无限画布 AI 工作流与 Agent 协作工作台**，让剧本、角色、分镜、关键帧与视频节点在同一画布协作。
-
-在线站点：[https://aicon-studio.com/](https://aicon-studio.com/)
-
-技术栈：`FastAPI`、`Vue 3`、`PostgreSQL`、`Redis`、`Celery`、`MinIO`
-
-## 更新告知
-
-**2026-09-10 · 中转站迁移与模型供应统一**
-
-中转站现已更换为 [https://api.aicon-studio.com/](https://api.aicon-studio.com/)，模型调用接口保持不变。OpenAI 兼容连接请使用 `https://api.aicon-studio.com/v1`，其他协议路径见 [API 接口文档](https://dcsynw64g3.apifox.cn/)。已有用户请在“API 密钥管理”中更新 Base URL。
-
-本次代码更新统一了模型供应入口：从站点动态获取模型目录，结合密钥权限展示精选模型；默认提供文本 10、图片 8、视频 5、配音 5 个，每类最多 15 个，其余隐藏。同协议新模型可通过配置启用，无需修改业务代码；有可靠发布日期的模型按最新排序。
-
-升级时需应用数据库迁移 `030`，并同步更新 API、Worker 和 Beat。具体步骤与验证范围见[模型供应接入指南](docs/model-provider-configuration.md)和[自审记录](docs/model-provider-review.md)。
-
 ## 目录
 
-- [更新告知](#更新告知)
 - [项目概览](#项目概览)
-- [核心功能](#核心功能)
 - [适用场景](#适用场景)
-- [功能截图](#功能截图)
-- [Star 趋势](#star-趋势)
 - [演示](#演示)
 - [快速开始](#快速开始)
+- [核心功能](#核心功能)
+- [功能截图](#功能截图)
 - [使用说明](#使用说明)
+- [常见问题](#常见问题)
+- [更新告知](#更新告知)
 - [更新日志](#更新日志)
 - [交流与支持](#交流与支持)
 - [仓库结构](#仓库结构)
 - [相关文档](#相关文档)
+- [Star 趋势](#star-趋势)
 - [License](#license)
 
 ## 项目概览
 
-AICON 当前主要包含以下能力：
+| 模块 | 你可以完成的工作 |
+| --- | --- |
+| **Movie Studio · AI 电影工作室** | 从长文本拆解角色、场景与分镜，生成关键帧和过渡视频，组织成片素材。 |
+| **Canvas · 无限画布** | 连接文本、图片、视频节点，通过参考图、节点引用和自然语言助手搭建创作流程。 |
+| **Picture Narration · 图文说** | 拆分章节、生成配图与配音，将字幕和素材组合为解说视频。 |
+| **Distribution · 内容分发** | 对接 Bilibili，上传视频并生成标题、摘要与标签建议。 |
 
-- `Movie Studio`：将长文本拆解为角色、场景、分镜、关键帧和过渡视频，形成完整的 AI 电影制作链路。
-- `Picture Narration`：面向图文说和短视频配图场景，支持章节拆分、提示词生成、配图生成、语音合成与渲染。
-- `Canvas`：将文本、图片、视频节点放在同一画布中编辑，通过节点引用、连线和 Agent 助手组织生成上下文。
-- `Distribution`：支持 Bilibili 等平台的自动化发布与内容分发。
+- **可编辑的生成过程**：管理参考图与多轮结果，调整节点关系，回看并切换生成历史。
+- **角色参考图贯穿创作**：将角色三视图带入关键帧生成，辅助保持跨镜头角色一致性。
+- **可替换的模型服务**：支持兼容的自定义 Base URL；具体模型和协议通过配置接入。
+- **支持自部署**：基于 `FastAPI`、`Vue 3`、`PostgreSQL`、`Redis`、`Celery` 和 `MinIO`，使用异步队列处理生成任务。
 
-项目特征：
+> Canvas 助手当前负责创建节点与连线，图片和视频生成由用户手动触发。模型调用需要配置 API Key，费用由所选服务商收取。
 
-- 统一工作流：从文本到图片、视频、配音、发布尽量在一套系统内完成。
-- 可扩展供应商：支持自定义兼容 Base URL，可替换模型供应商。
-- 异步任务架构：适合长链路生成任务、批量任务与媒体处理任务。
-- 画布式创作：适合组织复杂 prompt、参考图和多轮生成结果。
-- Agent 协作工作流：支持在画布侧边助手中按视频工作流创建节点链路，并由用户手动触发生成。
+## 适用场景
+
+- 小说、剧本、设定集等长文本的影视化生成
+- AI 图文说、解说视频、剧情短视频的批量制作
+- 角色一致性要求较高的图像与视频生成
+- 提示词编排、参考图管理、多版本对比的创作流程
+
+## 演示
+
+示例视频：
+
+- [《静默战争》演示](https://www.bilibili.com/video/BV1DpvaB8EDE/?vd_source=2da8614f110387a6fe068f446424c748)
+- [《艾尔登法环真人版预告》演示](https://www.bilibili.com/video/BV1w3igBpEXo)
+
+## 快速开始
+
+推荐使用 Docker 自部署。准备 Docker 和 Docker Compose v2，并按[部署指南](docs/docker-deployment-guide.md)配置运行环境。
+
+```bash
+git clone https://github.com/869413421/ai-moive-studio.git
+cd ai-moive-studio
+
+cp .env.production.example .env.production
+# 编辑 .env.production，填写数据库、Redis、JWT、MinIO 等配置
+
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+```
+
+默认访问地址：
+
+- 前端：`http://localhost`
+- 后端 API：`http://localhost:8000`
+
+更多部署细节见 [docs/docker-deployment-guide.md](docs/docker-deployment-guide.md)。
+
+如需分别查看前后端说明，可进一步阅读：
+
+- [backend/README.md](backend/README.md)
+- [frontend/README.md](frontend/README.md)
 
 ## 核心功能
 
@@ -115,17 +146,7 @@ AICON 当前主要包含以下能力：
 - 支持接入 Bilibili API。
 - 支持上传视频、生成标题摘要与标签建议。
 
-## 适用场景
-
-- 小说、剧本、设定集等长文本的影视化生成
-- AI 图文说、解说视频、剧情短视频的批量制作
-- 角色一致性要求较高的图像与视频生成
-- 提示词编排、参考图管理、多版本对比的创作流程
-
 ## 功能截图
-
-### 无限画布Agent
-![无限画布](docs/media/agent.png)
 
 ### 角色管理
 ![角色管理](docs/media/角色管理.png)
@@ -141,43 +162,6 @@ AICON 当前主要包含以下能力：
 
 ### 发布管理
 ![发布管理](docs/media/发布管理.png)
-
-## Star 趋势
-
-[![Star History Chart](https://api.star-history.com/svg?repos=869413421/aicon&type=Date)](https://www.star-history.com/#869413421/aicon&Date)
-
-## 演示
-
-示例视频：
-
-- [《静默战争》演示](https://www.bilibili.com/video/BV1DpvaB8EDE/?vd_source=2da8614f110387a6fe068f446424c748)
-- [《艾尔登法环真人版预告》演示](https://www.bilibili.com/video/BV1w3igBpEXo)
-
-## 快速开始
-
-推荐使用 Docker 部署。
-
-```bash
-git clone https://github.com/869413421/aicon.git
-cd aicon
-
-cp .env.production.example .env.production
-# 编辑 .env.production，填写数据库、Redis、JWT、MinIO 等配置
-
-docker-compose -f docker-compose.prod.yml up -d
-```
-
-默认访问地址：
-
-- 前端：`http://localhost`
-- 后端 API：`http://localhost:8000`
-
-更多部署细节见 [docs/docker-deployment-guide.md](docs/docker-deployment-guide.md)。
-
-如需分别查看前后端说明，可进一步阅读：
-
-- [backend/README.md](backend/README.md)
-- [frontend/README.md](frontend/README.md)
 
 ## 使用说明
 
@@ -235,6 +219,30 @@ docker-compose -f docker-compose.prod.yml up -d
 3. 进入项目详情页，使用 `Movie Studio` 或 `Canvas`
 4. 按角色提取、场景提取、分镜生成、素材生成和视频合成的顺序推进
 
+## 常见问题
+
+### 开源是否意味着生成图片和视频免费？
+
+项目代码采用 Apache License 2.0。自部署需要自己的运行环境；图片、视频、文本和配音模型的调用费用取决于所选服务商，开源许可证不包含模型额度。
+
+### 必须使用作者提供的模型中转站吗？
+
+不需要。你可以接入自己的兼容网关或模型供应商，并配置对应的模型与协议。接入方式和限制见[模型供应接入指南](docs/model-provider-configuration.md)。
+
+### 输入一句话就会自动生成完整视频吗？
+
+Canvas 助手可以根据创意或剧本搭建角色、分镜、关键帧与视频节点，但当前不会自动提交生成任务。你需要检查工作流、选择模型，再手动触发生成。
+
+## 更新告知
+
+**2026-09-10 · 中转站迁移与模型供应统一**
+
+中转站现已更换为 [https://api.aicon-studio.com/](https://api.aicon-studio.com/)，模型调用接口保持不变。OpenAI 兼容连接请使用 `https://api.aicon-studio.com/v1`，其他协议路径见 [API 接口文档](https://dcsynw64g3.apifox.cn/)。已有用户请在“API 密钥管理”中更新 Base URL。
+
+本次代码更新统一了模型供应入口：从站点动态获取模型目录，结合密钥权限展示精选模型；默认提供文本 10、图片 8、视频 5、配音 5 个，每类最多 15 个，其余隐藏。同协议新模型可通过配置启用，无需修改业务代码；有可靠发布日期的模型按最新排序。
+
+升级时需应用数据库迁移 `030`，并同步更新 API、Worker 和 Beat。具体步骤与验证范围见[模型供应接入指南](docs/model-provider-configuration.md)和[自审记录](docs/model-provider-review.md)。
+
 ## 更新日志
 
 ### 2026-09-10
@@ -283,14 +291,12 @@ docker-compose -f docker-compose.prod.yml up -d
 
 ## 交流与支持
 
-扫码加入 AICON 内测交流群，获取最新动态、功能更新与使用支持。
-
-<img src="docs/media/qr.jpg" width="200" alt="AICON 内测交流群">
+使用问题、Bug 反馈与功能建议，请通过 [GitHub Issues](https://github.com/869413421/ai-moive-studio/issues)交流。反馈时请附上复现步骤和脱敏日志，不要提交 API Key、账户密码或私人素材。
 
 ## 仓库结构
 
 ```text
-aicon/
+ai-moive-studio/
 ├── backend/     # FastAPI 后端、任务队列、数据模型
 ├── frontend/    # Vue 3 前端
 ├── docs/        # 部署与开发文档
@@ -302,6 +308,10 @@ aicon/
 - [backend/README.md](backend/README.md)
 - [frontend/README.md](frontend/README.md)
 - [docs/docker-deployment-guide.md](docs/docker-deployment-guide.md)
+
+## Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=869413421/ai-moive-studio&type=Date)](https://www.star-history.com/#869413421/ai-moive-studio&Date)
 
 ## License
 
