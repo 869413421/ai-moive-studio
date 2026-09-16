@@ -34,6 +34,7 @@ class APIKeyProvider(str, Enum):
     VOLCENGINE = "volcengine"
     CUSTOM = "custom"
     SILICONFLOW = "siliconflow"
+    ATLASCLOUD = "atlascloud"
 
 
 class APIKey(BaseModel):

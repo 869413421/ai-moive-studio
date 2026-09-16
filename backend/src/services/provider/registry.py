@@ -14,6 +14,7 @@ PROVIDERS = {
     'deepseek': ('DeepSeek', 'https://api.deepseek.com/v1'),
     'volcengine': ('火山引擎', 'https://ark.cn-beijing.volces.com/api/v3'),
     'vectorengine': ('Vector Engine', 'https://api.vectorengine.ai/v1'),
+    'atlascloud': ('Atlas Cloud', 'https://api.atlascloud.ai/v1'),
 }
 PROFILE_TYPES = {
     'chat': 'text', 'responses': 'text',
