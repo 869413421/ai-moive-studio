@@ -7,7 +7,7 @@
 
 Open-source AI video creation with an infinite canvas and a natural-language workflow assistant.
 
-[在线体验](https://aicon-studio.com/?utm_source=github&utm_medium=readme&utm_campaign=aicon) · [演示](#演示) · [快速开始](#快速开始) · [使用指南](docs/user-guide.md) · [问题反馈](https://github.com/869413421/ai-moive-studio/issues)
+[在线体验](https://aicon-studio.com/?utm_source=github&utm_medium=readme&utm_campaign=aicon) · [演示](#演示) · [快速开始](#快速开始) · [关于中转站](#关于中转站) · [使用指南](docs/user-guide.md) · [问题反馈](https://github.com/869413421/ai-moive-studio/issues)
 
 ## 赞助商
 
@@ -55,6 +55,20 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 启动后访问 `http://localhost`，在「API 密钥管理」配置模型服务，再创建项目或画布开始创作。
 
 完整步骤见 [Docker 部署指南](docs/docker-deployment-guide.md)与[模型配置说明](docs/user-guide.md#使用说明)。已有部署升级前，请查看[更新记录](docs/changelog.md)。
+
+## 关于中转站
+
+[AICON 模型中转站](https://api.aicon-studio.com/)是我自己部署、自己也在用的大模型兼容中转站。做这个项目需要用到不同的模型，我希望有一个方便维护、能长期使用、成本也尽量合理的接入方式，所以把它一起开放给有需要的朋友。
+
+**AICON 不强制绑定这个站点，大家可以自行替换。** 如果你已经有自己的兼容网关或模型供应商，可以继续使用自己的 API Key 和 Base URL，并按[接入指南](docs/model-provider-configuration.md)配置对应的模型与协议。
+
+如果你想使用我的中转站：
+
+1. 在 [api.aicon-studio.com](https://api.aicon-studio.com/) 注册，按需购买额度，并在令牌页面创建 API Key。建议先少量体验，确认模型和效果适合自己再继续使用。
+2. 在 AICON 的「API 密钥管理」中选择「自定义」，填入 API Key；OpenAI 兼容接口的 Base URL 填写 `https://api.aicon-studio.com/v1`，末尾不加斜杠。
+3. 其他协议的调用方式见 [API 接口文档](https://dcsynw64g3.apifox.cn/)，模型与价格可在站内查看。
+
+已有用户请将旧中转站地址更新为上述地址；如果还有未完成的视频任务，请先保留原连接，具体说明见[使用指南](docs/user-guide.md#使用说明)。
 
 ## 文档与交流
 

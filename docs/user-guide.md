@@ -94,7 +94,7 @@
 
 ### 3. 关于中转站
 
-`https://api.aicon-studio.com/` 是项目作者自部署的大模型兼容中转站，目标是提供长期可用、相对低价的接入方式，并非强制绑定。OpenAI 兼容调用的 Base URL 为 `https://api.aicon-studio.com/v1`，其他协议路径请参考接口文档。
+[AICON 模型中转站](https://api.aicon-studio.com/)是我自己部署、自己也在用的大模型兼容中转站，希望提供一个方便维护、能长期使用、成本尽量合理的接入方式，也开放给有需要的朋友。**AICON 不强制绑定这个站点，大家可以自行替换。** OpenAI 兼容调用的 Base URL 为 `https://api.aicon-studio.com/v1`，其他协议路径请参考接口文档。
 
 如果你已有自己的兼容网关、代理层或模型供应商，可以配置 Base URL，并在精选配置的 `sources` 中声明该连接适用的模型和协议。现有密钥与作品保留；未配置用途与协议的型号保持隐藏。
 
